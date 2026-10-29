@@ -1,0 +1,15 @@
+# Cline no leerá estos archivos (evita enviar secretos y datos pesados al modelo)
+.env
+.cache
+*.log
+*_out.txt
+test_run.txt
+final_run.txt
+.streamlit/secrets.toml
+data/
+*.db
+Streaming_History_*.json
+Spotify Extended Streaming History/
+__pycache__/
+.venv/
+venv/

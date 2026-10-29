@@ -1,0 +1,23 @@
+# Secretos
+.env
+.cache
+.streamlit/secrets.toml
+
+# Datos personales
+data/
+*.db
+Streaming_History_*.json
+Spotify Extended Streaming History/
+
+# Salidas temporales de depuración
+*.log
+*_out.txt
+test_run.txt
+final_run.txt
+smoke_result.txt
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

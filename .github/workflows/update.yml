@@ -1,0 +1,39 @@
+name: Actualizar playlists automáticas
+
+# Solo actualiza las playlists que salen de la API de Spotify (sin base de datos).
+# El registro propio y las de 7 días / último año se actualizan desde tu PC (ver README).
+
+on:
+  schedule:
+    - cron: "0 4 * * *"   # cada día a las 04:00 UTC
+  workflow_dispatch:       # botón "Run workflow" en la pestaña Actions
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-playlists
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # Restaura el token de Spotify desde el secret SPOTIFY_CACHE (contenido de tu .cache).
+      - name: Ejecutar actualización
+        env:
+          SPOTIPY_CLIENT_ID: ${{ secrets.SPOTIPY_CLIENT_ID }}
+          SPOTIPY_CLIENT_SECRET: ${{ secrets.SPOTIPY_CLIENT_SECRET }}
+          SPOTIFY_CACHE: ${{ secrets.SPOTIFY_CACHE }}
+          HISTORY_ENABLED: "false"
+        run: python cron.py --api-only
