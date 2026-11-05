@@ -47,8 +47,23 @@ def get_timezone() -> ZoneInfo:
         ) from exc
 
 
+def get_database_url() -> str:
+    """URL de Postgres en la nube (Neon, Supabase...). Vacía = SQLite local."""
+    return os.environ.get("DATABASE_URL", "").strip()
+
+
+def use_db_tokens() -> bool:
+    """Con base de datos en la nube, los tokens de Spotify se guardan en ella (no en .cache)."""
+    return bool(get_database_url())
+
+
 def history_enabled() -> bool:
-    """False si HISTORY_ENABLED es false/0/no/off (p. ej. Streamlit Cloud, sin disco persistente)."""
+    """False si HISTORY_ENABLED es false/0/no/off (sin disco persistente ni DATABASE_URL).
+
+    Con DATABASE_URL el historial vive en la nube y siempre está disponible.
+    """
+    if get_database_url():
+        return True
     raw = os.environ.get("HISTORY_ENABLED", "").strip().lower()
     return raw not in ("false", "0", "no", "off")
 

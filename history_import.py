@@ -7,11 +7,11 @@ objetos con ``ts`` (UTC), ``ms_played``, ``spotify_track_uri``,
 from __future__ import annotations
 
 import json
-import sqlite3
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Sequence
 
+from db import Database
 from history import PlayRow, add_plays, parse_ts
 
 
@@ -58,18 +58,31 @@ def rows_from_export(entries: Sequence[object]) -> tuple[list[PlayRow], ImportSt
             ms_played = int(entry["ms_played"]) if entry.get("ms_played") is not None else None
         except (TypeError, ValueError):
             ms_played = None
-        rows.append((
-            ts,
-            str(uri),
-            entry.get("master_metadata_track_name"),
-            entry.get("master_metadata_album_artist_name"),
-            entry.get("master_metadata_album_album_name"),
-            ms_played,
+        rows.append(PlayRow(
+            ts=ts,
+            track_uri=str(uri),
+            track_name=entry.get("master_metadata_track_name"),
+            artist=entry.get("master_metadata_album_artist_name"),
+            album=entry.get("master_metadata_album_album_name"),
+            ms_played=ms_played,
+            skipped=_optional_bool(entry.get("skipped")),
+            reason_end=entry.get("reason_end") or None,
+            shuffle=_optional_bool(entry.get("shuffle")),
+            platform=entry.get("platform") or None,
         ))
     return rows, stats
 
 
-def import_export_bytes(conn: sqlite3.Connection, data: bytes) -> ImportStats:
+def _optional_bool(value: object) -> "bool | None":
+    """El export usa true/false/null (a veces 0/1)."""
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return None
+
+
+def import_export_bytes(conn: Database, user_id: str, data: bytes) -> ImportStats:
     """Importa el contenido de un único JSON del historial exportado."""
     try:
         parsed = json.loads(data.decode("utf-8-sig"))
@@ -79,7 +92,7 @@ def import_export_bytes(conn: sqlite3.Connection, data: bytes) -> ImportStats:
         raise ValueError("El JSON debe contener una lista de reproducciones.")
     rows, stats = rows_from_export(parsed)
     stats.files = 1
-    stats.inserted, stats.duplicates = add_plays(conn, rows, "export")
+    stats.inserted, stats.duplicates = add_plays(conn, user_id, rows, "export")
     return stats
 
 
@@ -97,8 +110,10 @@ def find_export_files(paths: Sequence["str | Path"]) -> list[Path]:
     return found
 
 
-def import_export_files(conn: sqlite3.Connection, paths: Sequence["str | Path"]) -> ImportStats:
+def import_export_files(
+    conn: Database, user_id: str, paths: Sequence["str | Path"]
+) -> ImportStats:
     total = ImportStats()
     for file_path in find_export_files(paths):
-        total.merge(import_export_bytes(conn, file_path.read_bytes()))
+        total.merge(import_export_bytes(conn, user_id, file_path.read_bytes()))
     return total

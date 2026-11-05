@@ -1,8 +1,8 @@
 # Autospoti
 
-Aplicacion Streamlit para crear y mantener playlists automaticas de Spotify.
+Aplicacion Streamlit para crear y mantener playlists automaticas de Spotify, con un registro propio de todo lo que escuchas.
 
-## Abrir la aplicacion
+## Abrir la aplicacion en local
 
 En Windows, haz doble clic en [Abrir Autospoti.bat](./Abrir%20Autospoti.bat). El script inicia Streamlit y abre la aplicacion en el navegador.
 
@@ -13,16 +13,28 @@ python -m pip install -r requirements.txt
 python auth.py
 ```
 
-La configuracion local se guarda en `.env`; no subas ese archivo ni `.cache`.
+La configuracion local se guarda en `.env`; no subas ese archivo ni `.cache`. Sin `DATABASE_URL` el historial se guarda en `data/history.db` (SQLite).
 
-## Actualizacion diaria con GitHub Actions
+## En la nube (gratis): base de datos + registro cada hora
 
-El workflow [`.github/workflows/update.yml`](./.github/workflows/update.yml) ejecuta `python cron.py --api-only` cada dia a las 04:00 UTC. Actualiza las playlists basadas en la API de Spotify (ultimas reproducciones, aproximadamente 4 semanas y aproximadamente 6 meses). Las playlists que necesitan el historial SQLite local se siguen actualizando desde el ordenador.
+Con una base de datos Postgres en la nube, GitHub Actions registra tus escuchas **cada hora** (sin depender de que tu PC este encendido) y actualiza las 5 playlists cada dia a las 04:00 UTC.
 
-En **Settings > Secrets and variables > Actions** del repositorio, crea estos secrets:
+1. Crea una base de datos gratuita en [Neon](https://neon.tech) (o Supabase) y copia la *connection string* (`postgresql://...?sslmode=require`).
+2. En **Settings > Secrets and variables > Actions** del repositorio, crea estos secrets:
+   * `SPOTIPY_CLIENT_ID` y `SPOTIPY_CLIENT_SECRET`: de tu aplicacion de Spotify.
+   * `DATABASE_URL`: la connection string del paso 1.
+   * `SPOTIFY_CACHE`: contenido JSON de tu archivo `.cache` (se genera con `python auth.py`). Solo se usa la primera vez: despues el token se guarda **cifrado** en la base de datos y se renueva solo.
+   * `TOKEN_ENCRYPTION_KEY` (opcional): clave Fernet propia. Si no existe, se deriva de `SPOTIPY_CLIENT_SECRET`.
+3. En la pestana **Actions**, lanza el workflow con **Run workflow** para comprobarlo.
 
-* `SPOTIPY_CLIENT_ID`: Client ID de tu aplicacion de Spotify.
-* `SPOTIPY_CLIENT_SECRET`: Client Secret de tu aplicacion de Spotify.
-* `SPOTIFY_CACHE`: contenido JSON de tu archivo `.cache`, generado despues de ejecutar `python auth.py`.
+Sin `DATABASE_URL`, el workflow funciona como antes: solo actualiza una vez al dia las 3 playlists que salen de la API de Spotify.
 
-El workflow tambien se puede lanzar manualmente desde la pestana **Actions** con **Run workflow**.
+Nota: GitHub desactiva los workflows programados de repos publicos tras 60 dias sin actividad en el repo; si pasa, reactivalo desde la pestana Actions.
+
+## Tests
+
+```powershell
+python -m unittest discover -s tests
+```
+
+Para pasarlos tambien contra Postgres, define `TEST_DATABASE_URL` (se vacian sus tablas).

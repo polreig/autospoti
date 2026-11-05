@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 import spotipy
-from spotipy.cache_handler import CacheFileHandler
+from spotipy.cache_handler import CacheFileHandler, CacheHandler
 from spotipy.exceptions import SpotifyException
 from spotipy.oauth2 import SpotifyOAuth, SpotifyOauthError
 
@@ -20,6 +20,7 @@ SCOPE = (
     "user-top-read user-read-recently-played"
 )
 PLAYLIST_BATCH = 100          # máximo de items por petición de playlist
+MAX_PLAYLIST_TRACKS = 10_000  # límite de Spotify por playlist
 MAX_DESCRIPTION = 300         # límite de Spotify para la descripción
 
 
@@ -37,21 +38,29 @@ def _restore_cache_from_env() -> None:
         CACHE_PATH.write_text(cache_data, encoding="utf-8")
 
 
-def build_auth_manager(open_browser: bool = False) -> SpotifyOAuth:
-    _restore_cache_from_env()
+def build_auth_manager(
+    open_browser: bool = False, cache_handler: "CacheHandler | None" = None
+) -> SpotifyOAuth:
+    """``cache_handler`` None = fichero ``.cache`` local (restaurado de SPOTIFY_CACHE si hace falta)."""
+    if cache_handler is None:
+        _restore_cache_from_env()
+        cache_handler = CacheFileHandler(cache_path=str(CACHE_PATH))
     return SpotifyOAuth(
         client_id=required_env("SPOTIPY_CLIENT_ID"),
         client_secret=required_env("SPOTIPY_CLIENT_SECRET"),
         redirect_uri=os.environ.get("SPOTIPY_REDIRECT_URI", "").strip() or DEFAULT_REDIRECT_URI,
         scope=SCOPE,
-        cache_handler=CacheFileHandler(cache_path=str(CACHE_PATH)),
+        cache_handler=cache_handler,
         open_browser=open_browser,
     )
 
 
-def get_spotify_client() -> spotipy.Spotify:
-    """Cliente no interactivo. Lanza AuthRequiredError si falta autorización."""
-    auth_manager = build_auth_manager(open_browser=False)
+def get_spotify_client(cache_handler: "CacheHandler | None" = None) -> spotipy.Spotify:
+    """Cliente no interactivo. Lanza AuthRequiredError si falta autorización.
+
+    ``cache_handler``: dónde está el token (por defecto ``.cache``; en la nube, la BD).
+    """
+    auth_manager = build_auth_manager(open_browser=False, cache_handler=cache_handler)
     token_info = auth_manager.cache_handler.get_cached_token()
     if not token_info:
         raise AuthRequiredError(
@@ -115,15 +124,49 @@ class PlaylistResult:
     url: "str | None" = None
 
 
-def find_own_playlist(sp: spotipy.Spotify, user_id: str, name: str) -> "str | None":
-    """Busca entre TODAS las playlists propias (paginando) una con ese nombre exacto."""
-    page = sp.current_user_playlists(limit=50)
-    while page:
-        for pl in page.get("items", []):
-            if pl and pl.get("name") == name and (pl.get("owner") or {}).get("id") == user_id:
-                return pl["id"]
-        page = sp.next(page) if page.get("next") else None
-    return None
+class PlaylistIndex:
+    """Playlists propias del usuario, descargadas UNA vez (perezosamente) y reutilizadas.
+
+    Antes cada playlist escrita volvía a paginar todas tus playlists; con 5 automáticas
+    eran 5 recorridos completos. Comparte un índice entre escrituras de la misma ejecución.
+    """
+
+    def __init__(self, sp: spotipy.Spotify, user_id: str):
+        self._sp = sp
+        self._user_id = user_id
+        self._names: "dict[str, str] | None" = None  # id -> nombre
+
+    def _load(self) -> dict[str, str]:
+        if self._names is None:
+            names: dict[str, str] = {}
+            page = self._sp.current_user_playlists(limit=50)
+            while page:
+                for pl in page.get("items", []):
+                    if pl and (pl.get("owner") or {}).get("id") == self._user_id:
+                        names[pl["id"]] = pl.get("name") or ""
+                page = self._sp.next(page) if page.get("next") else None
+            self._names = names
+        return self._names
+
+    def owns(self, playlist_id: str) -> bool:
+        """True si la playlist sigue en tu biblioteca y es tuya (no borrada/dejada de seguir)."""
+        return playlist_id in self._load()
+
+    def find_by_name(self, name: str) -> "str | None":
+        for playlist_id, pl_name in self._load().items():
+            if pl_name == name:
+                return playlist_id
+        return None
+
+    def remember(self, playlist_id: str, name: str) -> None:
+        self._load()[playlist_id] = name
+
+
+def _write_items(sp: spotipy.Spotify, playlist_id: str, uris: list[str]) -> None:
+    """Sustituye el contenido: primer lote con replace, el resto se añade por lotes de 100."""
+    sp.playlist_replace_items(playlist_id, uris[:PLAYLIST_BATCH])
+    for start in range(PLAYLIST_BATCH, len(uris), PLAYLIST_BATCH):
+        sp.playlist_add_items(playlist_id, uris[start:start + PLAYLIST_BATCH])
 
 
 def create_or_update_playlist(
@@ -133,21 +176,32 @@ def create_or_update_playlist(
     track_uris: list[str],
     description: str = "",
     public: bool = False,
+    *,
+    index: "PlaylistIndex | None" = None,
+    playlist_id: "str | None" = None,
 ) -> PlaylistResult:
-    """Crea o actualiza una playlist propia. Con lista vacía NO toca nada (evita vaciarla)."""
+    """Crea o actualiza una playlist propia. Con lista vacía NO toca nada (evita vaciarla).
+
+    ``playlist_id``: ID recordado de una ejecución anterior; se usa si la playlist sigue
+    siendo tuya aunque le hayas cambiado el nombre. Si no, se busca por nombre exacto.
+    ``index``: índice compartido para no volver a descargar tus playlists en cada llamada.
+    """
     if not track_uris:
         return PlaylistResult(playlist_id=None, created=False, track_count=0)
 
-    uris = track_uris[:PLAYLIST_BATCH]
+    uris = list(track_uris[:MAX_PLAYLIST_TRACKS])
     description = description[:MAX_DESCRIPTION]
-    playlist_id = find_own_playlist(sp, user_id, name)
+    index = index or PlaylistIndex(sp, user_id)
+    if not (playlist_id and index.owns(playlist_id)):
+        playlist_id = index.find_by_name(name)
     created = playlist_id is None
     if created:
         playlist = sp.current_user_playlist_create(name=name, public=public, description=description)
         playlist_id = playlist["id"]
+        index.remember(playlist_id, name)
     else:
         sp.playlist_change_details(playlist_id, description=description)
-    sp.playlist_replace_items(playlist_id, uris)
+    _write_items(sp, playlist_id, uris)
     return PlaylistResult(
         playlist_id=playlist_id,
         created=created,

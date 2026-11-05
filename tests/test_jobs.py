@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config  # noqa: E402
 import cron  # noqa: E402
 import history  # noqa: E402
+from _db import fresh_db  # noqa: E402
 import jobs  # noqa: E402
 from spotify_core import PlaylistResult  # noqa: E402
 
@@ -21,7 +22,7 @@ class ApiOnlyTests(unittest.TestCase):
     def test_api_only_updates_only_three_playlists_without_db(self):
         written = []
 
-        def fake_create(sp, user_id, name, uris, description=""):
+        def fake_create(sp, user_id, name, uris, description="", **kwargs):
             written.append(name)
             return fake_result(name)
 
@@ -44,9 +45,10 @@ class ApiOnlyTests(unittest.TestCase):
 
     def test_full_mode_updates_five_playlists(self):
         written = []
-        conn = history.connect(":memory:")
+        conn = fresh_db()
+        self.addCleanup(conn.close)
 
-        def fake_create(sp, user_id, name, uris, description=""):
+        def fake_create(sp, user_id, name, uris, description="", **kwargs):
             written.append(name)
             return fake_result(name)
 
@@ -70,18 +72,19 @@ class ApiOnlyTests(unittest.TestCase):
         from datetime import datetime, timedelta, timezone
 
         written = []
-        conn = history.connect(":memory:")
+        conn = fresh_db()
+        self.addCleanup(conn.close)
         now = datetime.now(timezone.utc)
         recent_ts = int((now - timedelta(days=10)).timestamp())
         old_ts = int((now - timedelta(days=400)).timestamp())
         conn.executemany(
-            "INSERT INTO plays (ts, track_uri, track_name, artist, album, ms_played, source) "
-            "VALUES (?, ?, 'S', 'A', 'Al', 60000, 'export')",
+            "INSERT INTO plays (user_id, ts, track_uri, track_name, artist, album, ms_played, source) "
+            "VALUES ('me', ?, ?, 'S', 'A', 'Al', 60000, 'export')",
             [(old_ts, "spotify:track:old"), (recent_ts, "spotify:track:new")],
         )
         conn.commit()
 
-        def fake_create(sp, user_id, name, uris, description=""):
+        def fake_create(sp, user_id, name, uris, description="", **kwargs):
             written.append((name, list(uris)))
             return fake_result(name)
 
@@ -94,6 +97,54 @@ class ApiOnlyTests(unittest.TestCase):
         # Cubre el año (dato de hace 400 días) y hay escuchas dentro: sale del registro,
         # y solo incluye la canción reciente, no la antigua.
         self.assertEqual(year, ["spotify:track:new"])
+
+    def test_one_index_per_run_and_ids_remembered(self):
+        conn = fresh_db()
+        self.addCleanup(conn.close)
+        indexes = []
+
+        def fake_create(sp, user_id, name, uris, description="", **kwargs):
+            indexes.append(kwargs["index"])
+            return PlaylistResult(playlist_id=f"id-{name}", created=True, track_count=1, url="u")
+
+        recent = [{"track": {"id": "1", "uri": "spotify:track:1"}, "played_at": "2024-01-01T10:00:00Z"}]
+        top = [{"id": "2", "uri": "spotify:track:2"}]
+        with mock.patch.object(jobs, "get_recently_played", return_value=recent), \
+                mock.patch.object(jobs, "get_top_tracks", return_value=top), \
+                mock.patch.object(jobs, "create_or_update_playlist", side_effect=fake_create):
+            jobs.update_auto_playlists(object(), conn, "me")
+
+        self.assertGreaterEqual(len(indexes), 4)
+        self.assertTrue(all(i is indexes[0] for i in indexes))
+        self.assertEqual(history.get_playlist_id(conn, "me", jobs.NAME_4W), f"id-{jobs.NAME_4W}")
+        # La escucha reciente se registró a nombre del usuario.
+        self.assertEqual(history.coverage(conn, "me").total, 1)
+
+
+class WritePlaylistTests(unittest.TestCase):
+    def test_passes_remembered_id(self):
+        conn = fresh_db()
+        self.addCleanup(conn.close)
+        history.save_playlist_id(conn, "me", "Mi lista", "p1")
+        with mock.patch.object(jobs, "create_or_update_playlist",
+                               return_value=PlaylistResult("p1", False, 1, "u")) as create:
+            jobs.write_playlist(object(), conn, "me", "Mi lista", ["spotify:track:1"], "d")
+        self.assertEqual(create.call_args.kwargs["playlist_id"], "p1")
+
+    def test_without_db_works_by_name(self):
+        with mock.patch.object(jobs, "create_or_update_playlist",
+                               return_value=PlaylistResult("p9", True, 1, "u")) as create:
+            res = jobs.write_playlist(object(), None, "me", "L", ["spotify:track:1"], "d")
+        self.assertIsNone(create.call_args.kwargs["playlist_id"])
+        self.assertEqual(res.playlist_id, "p9")
+
+    def test_empty_result_not_saved(self):
+        conn = fresh_db()
+        self.addCleanup(conn.close)
+        with mock.patch.object(jobs, "create_or_update_playlist",
+                               return_value=PlaylistResult(None, False, 0)):
+            jobs.write_playlist(object(), conn, "me", "L", [], "d")
+        self.assertIsNone(history.get_playlist_id(conn, "me", "L"))
 
 
 class CronTests(unittest.TestCase):

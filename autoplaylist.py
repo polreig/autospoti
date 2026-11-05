@@ -12,12 +12,12 @@ import streamlit as st
 
 import history
 import jobs
-from config import ConfigError, get_min_play_ms, get_timezone, history_enabled
+import tokens
+from config import ConfigError, get_min_play_ms, get_timezone, history_enabled, use_db_tokens
 from dateranges import MESES_ES, format_ts, month_label, range_for_dates, range_for_month
 from history_import import import_export_bytes
 from spotify_core import (
     AuthRequiredError,
-    create_or_update_playlist,
     friendly_error,
     get_clean_track_uris,
     get_spotify_client,
@@ -55,23 +55,40 @@ def _check_password() -> None:
 
 
 @st.cache_resource
-def _cached_client():
+def _cached_file_client():
+    """Modo local: token en el fichero .cache (python auth.py)."""
     return get_spotify_client()
 
 
-@st.cache_resource
-def _cached_conn():
-    """Conexión SQLite compartida entre sesiones de Streamlit (hilos distintos)."""
-    import sqlite3
+def _session_conn():
+    """Una conexión por sesión del navegador (SQLite en WAL o Postgres en la nube).
 
-    from config import get_db_path
-    from history import SCHEMA
+    Antes se compartía una única conexión entre todas las sesiones y sus transacciones
+    podían mezclarse. En Postgres se comprueba en cada recarga por si el servidor la cortó.
+    """
+    conn = st.session_state.get("db_conn")
+    if conn is None:
+        conn = history.connect(check_same_thread=False)  # Streamlit re-ejecuta en otros hilos
+        st.session_state["db_conn"] = conn
+    return conn.ensure_alive()
 
-    path = get_db_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), check_same_thread=False)
-    conn.executescript(SCHEMA)
-    return conn
+
+def _cloud_client(conn):
+    """Modo nube: el token vive en la BD. Hasta la fase 2 (login con Spotify) se usa la
+    cuenta OWNER_SPOTIFY_ID o, si no está definida, la única/primera guardada."""
+    sp = st.session_state.get("cloud_sp")
+    if sp is not None:
+        return sp
+    tokens.bootstrap_from_env(conn)
+    accounts = tokens.list_accounts(conn)
+    if not accounts:
+        raise AuthRequiredError("No hay ninguna cuenta de Spotify en la base de datos. "
+                                "Añade SPOTIFY_CACHE (contenido de tu .cache) a los secrets.")
+    owner = os.environ.get("OWNER_SPOTIFY_ID", "").strip()
+    user_id = owner if owner in accounts else accounts[0]
+    sp = get_spotify_client(cache_handler=tokens.DbCacheHandler(conn, user_id))
+    st.session_state["cloud_sp"] = sp
+    return sp
 
 
 def _show_outcome(outcome: jobs.JobOutcome) -> None:
@@ -95,7 +112,7 @@ def tab_auto(sp, conn, user_id: str, tz) -> None:
             "- **≈4 semanas y ≈6 meses**: rankings de Spotify (la API no ofrece 30/180 días exactos)."
         )
     else:
-        cov = history.coverage(conn)
+        cov = history.coverage(conn, user_id)
         st.caption(
             f"Registro propio: {cov.total} reproducciones, de {format_ts(cov.first_ts, tz)} "
             f"a {format_ts(cov.last_ts, tz)}."
@@ -118,7 +135,7 @@ def tab_auto(sp, conn, user_id: str, tz) -> None:
             _show_outcome(outcome)
 
 
-def tab_import(conn, tz) -> None:
+def tab_import(conn, user_id: str, tz) -> None:
     st.header("Importar historial de Spotify")
     st.write(
         "Sube los archivos **Streaming_History_Audio_*.json** de tu *Extended streaming history* "
@@ -130,7 +147,7 @@ def tab_import(conn, tz) -> None:
         total = None
         for uploaded in files:
             try:
-                stats = import_export_bytes(conn, uploaded.getvalue())
+                stats = import_export_bytes(conn, user_id, uploaded.getvalue())
             except ValueError as exc:
                 st.error(f"{uploaded.name}: {exc}")
                 continue
@@ -147,7 +164,7 @@ def tab_import(conn, tz) -> None:
             if total.legacy_format:
                 st.warning("Hay entradas en el formato antiguo (StreamingHistory*.json), que no incluye "
                            "URIs y no se puede usar. Pide el *Extended streaming history*.")
-    cov = history.coverage(conn)
+    cov = history.coverage(conn, user_id)
     st.info(f"Registro actual: {cov.total} reproducciones ({format_ts(cov.first_ts, tz)} → "
             f"{format_ts(cov.last_ts, tz)}).")
 
@@ -178,26 +195,26 @@ def tab_custom(sp, conn, user_id: str, tz) -> None:
         label = f"{start:%d/%m/%Y} - {end:%d/%m/%Y}"
 
     name = st.text_input("Nombre de la playlist", value=f"Mi selección - {label}")
-    limit = st.slider("Número de canciones", min_value=10, max_value=100, value=50)
+    limit = st.slider("Número de canciones", min_value=10, max_value=500, value=50, step=10)
     min_seconds = st.number_input("Segundos mínimos para contar una escucha", min_value=0, max_value=300,
                                   value=get_min_play_ms() // 1000, step=5)
 
-    tracks = history.top_tracks(conn, start_ts, end_ts, limit, min_ms=int(min_seconds) * 1000)
+    tracks = history.top_tracks(conn, user_id, start_ts, end_ts, limit, min_ms=int(min_seconds) * 1000)
     if not tracks:
         st.warning("No hay reproducciones en ese periodo. Importa tu historial en la pestaña anterior.")
         return
     st.dataframe(
         [{"#": i, "Canción": t.name, "Artista": t.artist, "Reproducciones": t.plays}
          for i, t in enumerate(tracks, 1)],
-        hide_index=True, use_container_width=True,
+        hide_index=True, width="stretch",
     )
     if not name.strip():
         st.error("Pon un nombre a la playlist.")
         return
     if st.button("Crear / actualizar playlist"):
         try:
-            result = create_or_update_playlist(
-                sp, user_id, name.strip(), [t.uri for t in tracks],
+            result = jobs.write_playlist(
+                sp, conn, user_id, name.strip(), [t.uri for t in tracks],
                 f"Más escuchado: {label} (generado por autospoti).",
             )
         except Exception as exc:  # noqa: BLE001
@@ -208,7 +225,7 @@ def tab_custom(sp, conn, user_id: str, tz) -> None:
 
 
 
-def tab_spotify_top(sp, user_id: str) -> None:
+def tab_spotify_top(sp, conn, user_id: str) -> None:
     st.header("Rankings directos de Spotify")
     st.caption("Spotify solo ofrece tres periodos aproximados; no se pueden elegir fechas.")
     ranges = {
@@ -225,8 +242,8 @@ def tab_spotify_top(sp, user_id: str) -> None:
             return
         try:
             uris = get_clean_track_uris(get_top_tracks(sp, time_range, limit))
-            result = create_or_update_playlist(sp, user_id, name.strip(), uris,
-                                               f"Ranking de Spotify: {ranges[time_range]}.")
+            result = jobs.write_playlist(sp, conn, user_id, name.strip(), uris,
+                                        f"Ranking de Spotify: {ranges[time_range]}.")
         except Exception as exc:  # noqa: BLE001
             st.error(friendly_error(exc))
             return
@@ -244,8 +261,18 @@ def main() -> None:
 
     try:
         tz = get_timezone()
-        sp = _cached_client()
-        user_info = sp.current_user()
+        conn = _session_conn() if history_enabled() else None
+    except ConfigError as exc:
+        st.error(str(exc))
+        st.stop()
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"No se pudo abrir la base de datos: {type(exc).__name__}: {exc}")
+        st.stop()
+
+    try:
+        sp = _cloud_client(conn) if use_db_tokens() else _cached_file_client()
+        user_info = st.session_state.get("user_info") or sp.current_user()
+        st.session_state["user_info"] = user_info
         user_id = user_info["id"]
         st.sidebar.success(f"Conectado como: **{user_info.get('display_name') or user_id}**")
     except (ConfigError, AuthRequiredError) as exc:
@@ -255,25 +282,29 @@ def main() -> None:
         st.error(f"No se pudo conectar con Spotify. {friendly_error(exc)}")
         st.stop()
 
-    if not history_enabled():
+    if conn is not None and not st.session_state.get("orphans_claimed"):
+        # Historial migrado del esquema antiguo (sin usuario): pasa a ser del dueño.
+        history.claim_orphan_plays(conn, user_id)
+        st.session_state["orphans_claimed"] = True
+
+    if conn is None:
         # Sin historial (p. ej. Streamlit Cloud): solo automáticas por API y rankings de Spotify.
         tabs = st.tabs(["⚡ Automáticas", "🏆 Top de Spotify"])
         with tabs[0]:
             tab_auto(sp, None, user_id, tz)
         with tabs[1]:
-            tab_spotify_top(sp, user_id)
+            tab_spotify_top(sp, None, user_id)
         return
 
-    conn = _cached_conn()
     tabs = st.tabs(["⚡ Automáticas", "📥 Importar historial", "🗓️ Periodo personalizado", "🏆 Top de Spotify"])
     with tabs[0]:
         tab_auto(sp, conn, user_id, tz)
     with tabs[1]:
-        tab_import(conn, tz)
+        tab_import(conn, user_id, tz)
     with tabs[2]:
         tab_custom(sp, conn, user_id, tz)
     with tabs[3]:
-        tab_spotify_top(sp, user_id)
+        tab_spotify_top(sp, conn, user_id)
 
 
 if __name__ == "__main__":

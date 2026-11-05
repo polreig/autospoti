@@ -7,11 +7,13 @@ App en Python para crear playlists de Spotify (Streamlit + spotipy + SQLite).
 - Autorizar Spotify (una vez): `python auth.py`
 - Tarea programada: `python cron.py` (todo) o `python cron.py --record` (solo registrar)
 - Importar historial exportado: `python import_history.py "<carpeta o .json>"`
-- Tests: `python -m unittest discover -s tests`
+- Tests: `python -m unittest discover -s tests` (con `TEST_DATABASE_URL` también contra Postgres)
 
 ## Estructura
 - `config.py` carga `.env`; `spotify_core.py` = API de Spotify (sin Streamlit)
-- `history.py` = SQLite `data/history.db`; `history_import.py` = export de Spotify; `dateranges.py` = rangos
+- `db.py` = conexión y esquema: SQLite `data/history.db` en local, Postgres si hay `DATABASE_URL`. SQL portable con `?` (se traduce a `%s`); nada de `INSERT OR IGNORE`/`PRAGMA` fuera de `db.py`
+- `tokens.py` = tokens de Spotify cifrados en la BD (modo nube); `history.py` = consultas del historial
+- `history_import.py` = export de Spotify; `dateranges.py` = rangos
 - `jobs.py` = lógica compartida por la app y `cron.py`; `autoplaylist.py` = solo interfaz
 
 ## Reglas
@@ -21,4 +23,5 @@ App en Python para crear playlists de Spotify (Streamlit + spotipy + SQLite).
 - La API de Spotify (feb 2026) usa `/items` en playlists; spotipy >= 2.26. No usar endpoints antiguos `/tracks`.
 - Listas vacías nunca deben vaciar una playlist existente.
 - Todo instante se guarda en UTC (segundos Unix); la zona (`APP_TIMEZONE`) solo se aplica al interpretar fechas.
+- Toda consulta o escritura del historial lleva `user_id` (preparado para varios usuarios). Las playlists se escriben con `jobs.write_playlist` (recuerda su ID en `managed_playlists`) y compartiendo un `PlaylistIndex` por ejecución.
 - Añadir un test en `tests/` por cada cambio de lógica. Respuestas y textos de la interfaz en español.
