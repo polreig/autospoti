@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config  # noqa: E402
 import cron  # noqa: E402
 import history  # noqa: E402
+from _db import fresh_db  # noqa: E402
 import jobs  # noqa: E402
 from spotify_core import PlaylistResult  # noqa: E402
 
@@ -44,7 +45,7 @@ class ApiOnlyTests(unittest.TestCase):
 
     def test_full_mode_updates_five_playlists(self):
         written = []
-        conn = history.connect(":memory:")
+        conn = fresh_db()
         self.addCleanup(conn.close)
 
         def fake_create(sp, user_id, name, uris, description="", **kwargs):
@@ -71,7 +72,7 @@ class ApiOnlyTests(unittest.TestCase):
         from datetime import datetime, timedelta, timezone
 
         written = []
-        conn = history.connect(":memory:")
+        conn = fresh_db()
         self.addCleanup(conn.close)
         now = datetime.now(timezone.utc)
         recent_ts = int((now - timedelta(days=10)).timestamp())
@@ -98,7 +99,7 @@ class ApiOnlyTests(unittest.TestCase):
         self.assertEqual(year, ["spotify:track:new"])
 
     def test_one_index_per_run_and_ids_remembered(self):
-        conn = history.connect(":memory:")
+        conn = fresh_db()
         self.addCleanup(conn.close)
         indexes = []
 
@@ -122,7 +123,7 @@ class ApiOnlyTests(unittest.TestCase):
 
 class WritePlaylistTests(unittest.TestCase):
     def test_passes_remembered_id(self):
-        conn = history.connect(":memory:")
+        conn = fresh_db()
         self.addCleanup(conn.close)
         history.save_playlist_id(conn, "me", "Mi lista", "p1")
         with mock.patch.object(jobs, "create_or_update_playlist",
@@ -138,7 +139,7 @@ class WritePlaylistTests(unittest.TestCase):
         self.assertEqual(res.playlist_id, "p9")
 
     def test_empty_result_not_saved(self):
-        conn = history.connect(":memory:")
+        conn = fresh_db()
         self.addCleanup(conn.close)
         with mock.patch.object(jobs, "create_or_update_playlist",
                                return_value=PlaylistResult(None, False, 0)):

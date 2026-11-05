@@ -7,11 +7,13 @@ App en Python para crear playlists de Spotify (Streamlit + spotipy + SQLite).
 - Autorizar Spotify (una vez): `python auth.py`
 - Tarea programada: `python cron.py` (todo) o `python cron.py --record` (solo registrar)
 - Importar historial exportado: `python import_history.py "<carpeta o .json>"`
-- Tests: `python -m unittest discover -s tests`
+- Tests: `python -m unittest discover -s tests` (con `TEST_DATABASE_URL` también contra Postgres)
 
 ## Estructura
 - `config.py` carga `.env`; `spotify_core.py` = API de Spotify (sin Streamlit)
-- `history.py` = SQLite `data/history.db`; `history_import.py` = export de Spotify; `dateranges.py` = rangos
+- `db.py` = conexión y esquema: SQLite `data/history.db` en local, Postgres si hay `DATABASE_URL`. SQL portable con `?` (se traduce a `%s`); nada de `INSERT OR IGNORE`/`PRAGMA` fuera de `db.py`
+- `tokens.py` = tokens de Spotify cifrados en la BD (modo nube); `history.py` = consultas del historial
+- `history_import.py` = export de Spotify; `dateranges.py` = rangos
 - `jobs.py` = lógica compartida por la app y `cron.py`; `autoplaylist.py` = solo interfaz
 
 ## Reglas

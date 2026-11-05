@@ -12,7 +12,8 @@ import streamlit as st
 
 import history
 import jobs
-from config import ConfigError, get_min_play_ms, get_timezone, history_enabled
+import tokens
+from config import ConfigError, get_min_play_ms, get_timezone, history_enabled, use_db_tokens
 from dateranges import MESES_ES, format_ts, month_label, range_for_dates, range_for_month
 from history_import import import_export_bytes
 from spotify_core import (
@@ -54,22 +55,40 @@ def _check_password() -> None:
 
 
 @st.cache_resource
-def _cached_client():
+def _cached_file_client():
+    """Modo local: token en el fichero .cache (python auth.py)."""
     return get_spotify_client()
 
 
-def _session_conn(user_id: str):
-    """Una conexión SQLite por sesión del navegador (WAL permite varias a la vez).
+def _session_conn():
+    """Una conexión por sesión del navegador (SQLite en WAL o Postgres en la nube).
 
     Antes se compartía una única conexión entre todas las sesiones y sus transacciones
-    podían mezclarse. Al abrirla se asignan al usuario las filas migradas sin dueño.
+    podían mezclarse. En Postgres se comprueba en cada recarga por si el servidor la cortó.
     """
     conn = st.session_state.get("db_conn")
     if conn is None:
         conn = history.connect(check_same_thread=False)  # Streamlit re-ejecuta en otros hilos
-        history.claim_orphan_plays(conn, user_id)
         st.session_state["db_conn"] = conn
-    return conn
+    return conn.ensure_alive()
+
+
+def _cloud_client(conn):
+    """Modo nube: el token vive en la BD. Hasta la fase 2 (login con Spotify) se usa la
+    cuenta OWNER_SPOTIFY_ID o, si no está definida, la única/primera guardada."""
+    sp = st.session_state.get("cloud_sp")
+    if sp is not None:
+        return sp
+    tokens.bootstrap_from_env(conn)
+    accounts = tokens.list_accounts(conn)
+    if not accounts:
+        raise AuthRequiredError("No hay ninguna cuenta de Spotify en la base de datos. "
+                                "Añade SPOTIFY_CACHE (contenido de tu .cache) a los secrets.")
+    owner = os.environ.get("OWNER_SPOTIFY_ID", "").strip()
+    user_id = owner if owner in accounts else accounts[0]
+    sp = get_spotify_client(cache_handler=tokens.DbCacheHandler(conn, user_id))
+    st.session_state["cloud_sp"] = sp
+    return sp
 
 
 def _show_outcome(outcome: jobs.JobOutcome) -> None:
@@ -242,8 +261,18 @@ def main() -> None:
 
     try:
         tz = get_timezone()
-        sp = _cached_client()
-        user_info = sp.current_user()
+        conn = _session_conn() if history_enabled() else None
+    except ConfigError as exc:
+        st.error(str(exc))
+        st.stop()
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"No se pudo abrir la base de datos: {type(exc).__name__}: {exc}")
+        st.stop()
+
+    try:
+        sp = _cloud_client(conn) if use_db_tokens() else _cached_file_client()
+        user_info = st.session_state.get("user_info") or sp.current_user()
+        st.session_state["user_info"] = user_info
         user_id = user_info["id"]
         st.sidebar.success(f"Conectado como: **{user_info.get('display_name') or user_id}**")
     except (ConfigError, AuthRequiredError) as exc:
@@ -253,7 +282,12 @@ def main() -> None:
         st.error(f"No se pudo conectar con Spotify. {friendly_error(exc)}")
         st.stop()
 
-    if not history_enabled():
+    if conn is not None and not st.session_state.get("orphans_claimed"):
+        # Historial migrado del esquema antiguo (sin usuario): pasa a ser del dueño.
+        history.claim_orphan_plays(conn, user_id)
+        st.session_state["orphans_claimed"] = True
+
+    if conn is None:
         # Sin historial (p. ej. Streamlit Cloud): solo automáticas por API y rankings de Spotify.
         tabs = st.tabs(["⚡ Automáticas", "🏆 Top de Spotify"])
         with tabs[0]:
@@ -262,7 +296,6 @@ def main() -> None:
             tab_spotify_top(sp, None, user_id)
         return
 
-    conn = _session_conn(user_id)
     tabs = st.tabs(["⚡ Automáticas", "📥 Importar historial", "🗓️ Periodo personalizado", "🏆 Top de Spotify"])
     with tabs[0]:
         tab_auto(sp, conn, user_id, tz)

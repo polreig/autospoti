@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import dateranges  # noqa: E402
 import history  # noqa: E402
+from _db import fresh_db  # noqa: E402
 import history_import  # noqa: E402
 
 MADRID = ZoneInfo("Europe/Madrid")
@@ -34,7 +35,7 @@ def load(conn, data, user_id=ME):
 
 class HistoryTests(unittest.TestCase):
     def setUp(self):
-        self.conn = history.connect(":memory:")
+        self.conn = fresh_db()
         self.addCleanup(self.conn.close)
 
     def test_import_filters_and_dedups(self):

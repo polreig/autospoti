@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 import spotipy
-from spotipy.cache_handler import CacheFileHandler
+from spotipy.cache_handler import CacheFileHandler, CacheHandler
 from spotipy.exceptions import SpotifyException
 from spotipy.oauth2 import SpotifyOAuth, SpotifyOauthError
 
@@ -38,21 +38,29 @@ def _restore_cache_from_env() -> None:
         CACHE_PATH.write_text(cache_data, encoding="utf-8")
 
 
-def build_auth_manager(open_browser: bool = False) -> SpotifyOAuth:
-    _restore_cache_from_env()
+def build_auth_manager(
+    open_browser: bool = False, cache_handler: "CacheHandler | None" = None
+) -> SpotifyOAuth:
+    """``cache_handler`` None = fichero ``.cache`` local (restaurado de SPOTIFY_CACHE si hace falta)."""
+    if cache_handler is None:
+        _restore_cache_from_env()
+        cache_handler = CacheFileHandler(cache_path=str(CACHE_PATH))
     return SpotifyOAuth(
         client_id=required_env("SPOTIPY_CLIENT_ID"),
         client_secret=required_env("SPOTIPY_CLIENT_SECRET"),
         redirect_uri=os.environ.get("SPOTIPY_REDIRECT_URI", "").strip() or DEFAULT_REDIRECT_URI,
         scope=SCOPE,
-        cache_handler=CacheFileHandler(cache_path=str(CACHE_PATH)),
+        cache_handler=cache_handler,
         open_browser=open_browser,
     )
 
 
-def get_spotify_client() -> spotipy.Spotify:
-    """Cliente no interactivo. Lanza AuthRequiredError si falta autorización."""
-    auth_manager = build_auth_manager(open_browser=False)
+def get_spotify_client(cache_handler: "CacheHandler | None" = None) -> spotipy.Spotify:
+    """Cliente no interactivo. Lanza AuthRequiredError si falta autorización.
+
+    ``cache_handler``: dónde está el token (por defecto ``.cache``; en la nube, la BD).
+    """
+    auth_manager = build_auth_manager(open_browser=False, cache_handler=cache_handler)
     token_info = auth_manager.cache_handler.get_cached_token()
     if not token_info:
         raise AuthRequiredError(

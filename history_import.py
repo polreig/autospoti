@@ -7,11 +7,11 @@ objetos con ``ts`` (UTC), ``ms_played``, ``spotify_track_uri``,
 from __future__ import annotations
 
 import json
-import sqlite3
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Sequence
 
+from db import Database
 from history import PlayRow, add_plays, parse_ts
 
 
@@ -82,7 +82,7 @@ def _optional_bool(value: object) -> "bool | None":
     return None
 
 
-def import_export_bytes(conn: sqlite3.Connection, user_id: str, data: bytes) -> ImportStats:
+def import_export_bytes(conn: Database, user_id: str, data: bytes) -> ImportStats:
     """Importa el contenido de un único JSON del historial exportado."""
     try:
         parsed = json.loads(data.decode("utf-8-sig"))
@@ -111,7 +111,7 @@ def find_export_files(paths: Sequence["str | Path"]) -> list[Path]:
 
 
 def import_export_files(
-    conn: sqlite3.Connection, user_id: str, paths: Sequence["str | Path"]
+    conn: Database, user_id: str, paths: Sequence["str | Path"]
 ) -> ImportStats:
     total = ImportStats()
     for file_path in find_export_files(paths):

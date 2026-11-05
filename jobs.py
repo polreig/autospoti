@@ -1,12 +1,12 @@
 """Tareas de alto nivel compartidas por la app web (Streamlit) y por cron.py."""
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass
 
 import spotipy
 
 import history
+from db import Database
 from config import get_min_play_ms
 from dateranges import range_last_days
 from spotify_core import (
@@ -41,14 +41,14 @@ class JobOutcome:
 class _Ctx:
     """Lo que comparten todas las escrituras de una ejecución."""
     sp: spotipy.Spotify
-    conn: "sqlite3.Connection | None"
+    conn: "Database | None"
     user_id: str
     index: PlaylistIndex
 
 
 def write_playlist(
     sp: spotipy.Spotify,
-    conn: "sqlite3.Connection | None",
+    conn: "Database | None",
     user_id: str,
     name: str,
     uris: list[str],
@@ -73,7 +73,7 @@ def _write(ctx: _Ctx, name: str, uris: list[str], description: str) -> PlaylistR
     return write_playlist(ctx.sp, ctx.conn, ctx.user_id, name, uris, description, ctx.index)
 
 
-def record_recent_plays(sp: spotipy.Spotify, conn: sqlite3.Connection, user_id: str) -> tuple[int, int]:
+def record_recent_plays(sp: spotipy.Spotify, conn: Database, user_id: str) -> tuple[int, int]:
     """Guarda en la BD las últimas reproducciones (opción A). Devuelve (nuevas, duplicadas)."""
     rows = history.rows_from_recently_played(get_recently_played(sp))
     return history.add_plays(conn, user_id, rows, "api")
@@ -116,7 +116,7 @@ def _update_spotify_rankings(ctx: _Ctx) -> list[JobOutcome]:
 
 def update_auto_playlists(
     sp: spotipy.Spotify,
-    conn: "sqlite3.Connection | None",
+    conn: "Database | None",
     user_id: str,
     api_only: bool = False,
 ) -> list[JobOutcome]:
