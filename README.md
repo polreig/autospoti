@@ -1,63 +1,70 @@
 # Autospoti
 
-Aplicacion Streamlit para crear y mantener playlists automaticas de Spotify, con un registro propio de todo lo que escuchas.
+Web para crear y mantener playlists de Spotify a partir de un registro propio de todo lo que escuchas.
 
 * **Estadisticas**: escuchas y horas, evolucion por mes, artistas y canciones mas escuchados y un mapa de cuando escuchas (dia x hora).
 * **Playlist personalizada**: por periodo (ultimos N dias, un mes, fechas o todo) con filtros por meses, dias de la semana, franja horaria, artistas, escuchas minimas y "evitar las que sueles saltar".
 * **Redescubrimientos**: canciones que escuchaste mucho y llevas meses sin poner.
-* **Mis recetas**: cualquier playlist personalizada o de redescubrimientos puede guardarse para que se recalcule sola cada dia.
+* **En pareja**: mezclas con otra cuenta enlazada (lo que escuchais los dos, o mitad y mitad). Requiere que las dos personas acepten.
+* **Mis recetas**: cualquier playlist anterior puede guardarse para que se recalcule sola cada dia.
+* **Automaticas**: ultimas reproducciones, 7 dias, ~4 semanas, ~6 meses y ultimo ano.
 
-## Abrir la aplicacion en local
+## Como funciona en la nube (todo gratis)
 
-En Windows, haz doble clic en [Abrir Autospoti.bat](./Abrir%20Autospoti.bat). El script inicia Streamlit y abre la aplicacion en el navegador.
+| Pieza | Servicio | Que hace |
+|---|---|---|
+| Base de datos | [Neon](https://neon.tech) (Postgres) | historial, recetas, tokens cifrados |
+| Registro y recetas | GitHub Actions ([update.yml](./.github/workflows/update.yml)) | cada hora registra escuchas; cada dia actualiza playlists y recetas |
+| Web | [Vercel](https://vercel.com) (FastAPI) | login con Spotify, estadisticas, crear playlists |
 
-La primera vez, instala las dependencias y autoriza Spotify:
+## Puesta en marcha
+
+### 1. Base de datos (Neon)
+Crea un proyecto gratuito y copia la *connection string* (`postgresql://...?sslmode=require`). Sirve tanto la directa como la *pooled*.
+
+### 2. App de Spotify
+En el [dashboard de Spotify](https://developer.spotify.com/dashboard), en tu app > **Settings**:
+* Copia *Client ID* y *Client secret*.
+* En **Redirect URIs** anade `https://TU-PROYECTO.vercel.app/callback` (la URL exacta la tendras en el paso 4; puedes volver a anadirla despues).
+
+### 3. GitHub Actions (registro cada hora)
+En el repo, **Settings > Secrets and variables > Actions**, secrets:
+* `SPOTIPY_CLIENT_ID`, `SPOTIPY_CLIENT_SECRET`
+* `DATABASE_URL`: la de Neon
+* `SPOTIFY_CACHE` *(opcional)*: el contenido de un `.cache` generado con `python auth.py`. Solo sirve para que el registro empiece antes de tu primer login en la web; si no lo pones, empieza en cuanto entres en la web.
+
+### 4. Web (Vercel)
+1. En Vercel: **Add New > Project**, importa `polreig/autospoti`. *Framework preset*: Other. No hace falta tocar build ni output.
+2. En **Settings > Environment Variables** anade:
+   * `SPOTIPY_CLIENT_ID`, `SPOTIPY_CLIENT_SECRET`, `DATABASE_URL`
+   * `WEB_REDIRECT_URI` = `https://TU-PROYECTO.vercel.app/callback`
+   * `ALLOWED_SPOTIFY_IDS` = tu ID de Spotify (y el de tu pareja, separados por comas)
+   * `APP_TIMEZONE` = `Europe/Madrid` (opcional)
+3. **Deploy**. Abre la URL, pulsa *Iniciar sesion con Spotify* y, ya dentro, **Importar historial** para subir tus `Streaming_History_Audio_*.json`.
+
+Tu ID de Spotify aparece en **Tu cuenta** despues de entrar (o en spotify.com > Cuenta > *Nombre de usuario*).
+
+### 5. Tu pareja
+1. Dashboard de Spotify > tu app > **User Management**: anade su nombre y el email de su cuenta de Spotify (Development Mode admite pocas cuentas; para dos sobra).
+2. Anade su ID a `ALLOWED_SPOTIFY_IDS` en Vercel y vuelve a desplegar (*Redeploy*).
+3. Que entre en la web con su cuenta. Desde **En pareja**, uno invita al otro por su ID y el otro acepta.
+
+## Uso en tu PC (opcional)
 
 ```powershell
-python -m pip install -r requirements.txt
-python auth.py
+python -m pip install -r requirements-local.txt
+uvicorn webapp.main:create_app --factory --reload     # la web en http://127.0.0.1:8000
 ```
+Para la web en local anade `http://127.0.0.1:8000/callback` en los Redirect URIs de Spotify. Sin `DATABASE_URL` usa SQLite (`data/history.db`).
 
-La configuracion local se guarda en `.env`; no subas ese archivo ni `.cache`. Sin `DATABASE_URL` el historial se guarda en `data/history.db` (SQLite).
-
-## En la nube (gratis): base de datos + registro cada hora
-
-Con una base de datos Postgres en la nube, GitHub Actions registra tus escuchas **cada hora** (sin depender de que tu PC este encendido) y actualiza las 5 playlists cada dia a las 04:00 UTC.
-
-1. Crea una base de datos gratuita en [Neon](https://neon.tech) (o Supabase) y copia la *connection string* (`postgresql://...?sslmode=require`).
-2. En **Settings > Secrets and variables > Actions** del repositorio, crea estos secrets:
-   * `SPOTIPY_CLIENT_ID` y `SPOTIPY_CLIENT_SECRET`: de tu aplicacion de Spotify.
-   * `DATABASE_URL`: la connection string del paso 1.
-   * `SPOTIFY_CACHE`: contenido JSON de tu archivo `.cache` (se genera con `python auth.py`). Solo se usa la primera vez: despues el token se guarda **cifrado** en la base de datos y se renueva solo.
-   * `TOKEN_ENCRYPTION_KEY` (opcional): clave Fernet propia. Si no existe, se deriva de `SPOTIPY_CLIENT_SECRET`.
-3. En la pestana **Actions**, lanza el workflow con **Run workflow** para comprobarlo.
-
-Sin `DATABASE_URL`, el workflow funciona como antes: solo actualiza una vez al dia las 3 playlists que salen de la API de Spotify.
-
-Nota: GitHub desactiva los workflows programados de repos publicos tras 60 dias sin actividad en el repo; si pasa, reactivalo desde la pestana Actions.
-
-## La web (Streamlit Community Cloud, gratis)
-
-Con `DATABASE_URL`, la web pide **iniciar sesion con Spotify**: cada persona entra con su cuenta, su token se guarda cifrado en la base de datos y el registro horario empieza a incluirla automaticamente.
-
-1. En [share.streamlit.io](https://share.streamlit.io) crea una app: repositorio `polreig/autospoti`, rama `main`, archivo `autoplaylist.py`, Python 3.12. Elige la URL (por ejemplo `https://autospoti-pol.streamlit.app`).
-2. En **Settings > Secrets** de la app pega (formato TOML):
-   ```toml
-   SPOTIPY_CLIENT_ID = "..."
-   SPOTIPY_CLIENT_SECRET = "..."
-   DATABASE_URL = "postgresql://...?sslmode=require"
-   WEB_REDIRECT_URI = "https://autospoti-pol.streamlit.app/"
-   ALLOWED_SPOTIFY_IDS = "tu_id_de_spotify"
-   ```
-3. En el [dashboard de Spotify](https://developer.spotify.com/dashboard), en tu app > **Settings > Redirect URIs**, anade exactamente la misma `WEB_REDIRECT_URI`.
-4. Abre la web y pulsa **Iniciar sesion con Spotify** (se abre en otra pestana).
-
-Para que entre otra persona: anadela en **User Management** del dashboard de Spotify (Development Mode) y su ID en `ALLOWED_SPOTIFY_IDS`. Desde **Tu cuenta** cada uno puede cerrar sesion u olvidar su cuenta (deja de registrarse lo que escucha).
+La app Streamlit antigua sigue disponible para uso local de una sola cuenta: `python auth.py` y `streamlit run autoplaylist.py` (o *Abrir Autospoti.bat*).
 
 ## Tests
 
 ```powershell
+python -m pip install -r requirements-local.txt
 python -m unittest discover -s tests
 ```
-
 Para pasarlos tambien contra Postgres, define `TEST_DATABASE_URL` (se vacian sus tablas).
+
+Nota: GitHub desactiva los workflows programados de repos publicos tras 60 dias sin actividad en el repo; si pasa, reactivalo desde la pestana Actions.

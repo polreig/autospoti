@@ -143,10 +143,11 @@ class CloudCronTests(unittest.TestCase):
         self.assertEqual(code, 0)
         rec.assert_called_once()
 
-    def test_no_accounts_is_an_error(self):
+    def test_no_accounts_yet_is_not_an_error(self):
+        # Hasta el primer login en la web no hay cuentas: el cron horario no debe fallar.
         with mock.patch.dict(os.environ, {"SPOTIFY_CACHE": ""}):
             code, rec = self._run(clients={})
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 0)
         rec.assert_not_called()
 
     def test_full_mode_updates_playlists_per_account(self):

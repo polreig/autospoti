@@ -10,10 +10,11 @@ aplican en Python sobre las escuchas del periodo (``history.fetch_plays``).
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import date, datetime, timedelta, timezone, tzinfo
 from typing import Iterable
 
+import blend
 import history
 from dateranges import MESES_ES, range_for_dates, range_last_days
 from db import Database
@@ -50,6 +51,8 @@ class Spec:
     min_seconds: int = 30
     limit: int = 50
     forgotten_months: int = 6      # rediscover: sin escuchar desde hace N meses
+    partner: "str | None" = None   # blend: la otra cuenta (debe estar enlazada)
+    blend_mode: str = "comunes"    # blend: "comunes" | "mitad"
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=False, sort_keys=True)
@@ -62,8 +65,13 @@ class Spec:
         return cls(**{k: v for k, v in data.items() if k in known})
 
     def validate(self) -> None:
-        if self.kind not in ("top", "rediscover"):
+        if self.kind not in ("top", "rediscover", "blend"):
             raise ValueError(f"Tipo de receta desconocido: {self.kind}")
+        if self.kind == "blend":
+            if not self.partner:
+                raise ValueError("Falta la otra persona de la mezcla.")
+            if self.blend_mode not in blend.MODES:
+                raise ValueError(f"Modo de mezcla desconocido: {self.blend_mode}")
         if self.range_type not in ("last_days", "fixed", "all"):
             raise ValueError(f"Tipo de periodo desconocido: {self.range_type}")
         if self.range_type == "fixed":
@@ -81,11 +89,13 @@ class Spec:
         parts: list[str] = []
         if self.kind == "rediscover":
             parts.append(f"Redescubrimientos: no escuchadas en {self.forgotten_months} meses")
+        if self.kind == "blend":
+            parts.append(f"Mezcla con {self.partner} ({blend.MODES.get(self.blend_mode, self.blend_mode)})")
         if self.range_type == "last_days":
             parts.append(f"últimos {self.days} días")
         elif self.range_type == "fixed":
             parts.append(f"{_fmt_date(self.start)} - {_fmt_date(self.end)}")
-        elif self.kind == "top":
+        elif self.kind != "rediscover":
             parts.append("todo el historial")
         if self.months:
             parts.append(", ".join(MESES_ES[m - 1].lower() for m in sorted(self.months)))
@@ -183,6 +193,14 @@ def build_tracks(conn: Database, user_id: str, spec: Spec, tz: tzinfo,
     spec.validate()
     now = now or datetime.now(timezone.utc)
     start_ts, end_ts = resolve_range(spec, tz, now)
+    if spec.kind == "blend":
+        # Sin enlace aceptado no se lee NADA del historial de la otra persona.
+        if not blend.is_linked(conn, user_id, spec.partner):
+            return []
+        wide = replace(spec, limit=10_000) if spec.blend_mode == "comunes" else spec
+        mine = aggregate(history.fetch_plays(conn, user_id, start_ts, end_ts), wide, tz)
+        theirs = aggregate(history.fetch_plays(conn, spec.partner, start_ts, end_ts), wide, tz)
+        return blend.combine(mine, theirs, spec.blend_mode, spec.limit)
     exclude: set[str] = set()
     if spec.kind == "rediscover":
         cutoff = int((now - timedelta(days=30 * spec.forgotten_months)).timestamp())

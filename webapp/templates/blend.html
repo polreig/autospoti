@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}En pareja{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div class="kicker">Crear playlists</div>
+  <h1>En pareja</h1>
+  <p class="muted">Mezclas hechas con lo que escucháis los dos. Solo funcionan entre cuentas enlazadas:
+    una invita y la otra acepta. Cualquiera de las dos puede deshacer el enlace cuando quiera.</p>
+</header>
+
+{% if incoming %}
+<section class="card card-accent">
+  <h2>Invitaciones recibidas</h2>
+  {% for who in incoming %}
+  <div class="person">
+    <span class="avatar" aria-hidden="true">{{ names[who][:1] | upper }}</span>
+    <span class="grow"><strong>{{ names[who] }}</strong> <span class="muted small">({{ who }}) quiere mezclar vuestras escuchas</span></span>
+    <form method="post" action="/blend/accept"><input type="hidden" name="from_id" value="{{ who }}"><button class="btn btn-primary btn-sm">Aceptar</button></form>
+    <form method="post" action="/blend/remove"><input type="hidden" name="other_id" value="{{ who }}"><button class="btn btn-ghost btn-sm">Rechazar</button></form>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if partners %}
+{% set mode = q.get("mode", "comunes") %}
+<form class="card filters-card" method="get" action="/blend"
+      hx-get="/blend" hx-target="#main" hx-select="#main" hx-swap="outerHTML"
+      hx-trigger="change delay:250ms, submit" hx-push-url="true">
+  <div class="row">
+    <label class="field"><span>Con</span><select name="partner">
+      {% for p in partners %}<option value="{{ p }}" {% if q.get('partner') == p %}selected{% endif %}>{{ names[p] }}</option>{% endfor %}
+    </select></label>
+    <label class="field"><span>Periodo</span><select name="days">
+      {% for value, label in [("30", "Últimos 30 días"), ("90", "Últimos 90 días"), ("365", "Último año"), ("todo", "Todo")] %}
+        <option value="{{ value }}" {% if q.get('days', '90') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select></label>
+    <label class="field"><span>Canciones</span><input type="number" name="limit" min="10" max="500" step="10" value="{{ q.int('limit', 50, 10, 500) }}"></label>
+  </div>
+  <div class="segmented" role="radiogroup" aria-label="Tipo de mezcla">
+    {% for value, label in BLEND_MODES.items() %}
+      <label><input type="radio" name="mode" value="{{ value }}" {% if mode == value %}checked{% endif %}><span>{{ label | capitalize }}</span></label>
+    {% endfor %}
+  </div>
+  <noscript><button class="btn">Ver</button></noscript>
+</form>
+
+<section id="preview" class="card">
+  {% if rows %}
+    <p class="describe"><span class="ms" aria-hidden="true">favorite</span>{{ describe }}</p>
+    {% include "_create.html" %}
+    {% include "_tracks.html" %}
+  {% else %}
+    <p class="muted">Todavía no hay canciones para esta mezcla. Prueba con un periodo más largo
+      {% if q.get("mode", "comunes") == "comunes" %}o con «mitad y mitad»{% endif %}.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>{% if partners %}Tus enlaces{% else %}Invita a alguien{% endif %}</h2>
+  {% for p in partners %}
+  <div class="person">
+    <span class="avatar" aria-hidden="true">{{ names[p][:1] | upper }}</span>
+    <span class="grow"><strong>{{ names[p] }}</strong> <span class="muted small">({{ p }}) · enlazados</span></span>
+    <form method="post" action="/blend/remove" data-confirm="¿Deshacer el enlace con {{ names[p] }}? Vuestras mezclas dejarán de actualizarse.">
+      <input type="hidden" name="other_id" value="{{ p }}"><button class="btn btn-ghost btn-sm">Deshacer enlace</button></form>
+  </div>
+  {% endfor %}
+  {% for p in outgoing %}
+  <div class="person">
+    <span class="avatar avatar-muted" aria-hidden="true">{{ names[p][:1] | upper }}</span>
+    <span class="grow"><strong>{{ names[p] }}</strong> <span class="muted small">· invitación pendiente</span></span>
+    <form method="post" action="/blend/remove"><input type="hidden" name="other_id" value="{{ p }}"><button class="btn btn-ghost btn-sm">Cancelar</button></form>
+  </div>
+  {% endfor %}
+  <form class="row" method="post" action="/blend/invite">
+    <label class="field grow"><span>ID de Spotify de la otra persona</span>
+      <input type="text" name="partner_id" placeholder="p. ej. 1167xxxxxxx" required maxlength="64"></label>
+    <button class="btn btn-primary"><span class="ms" aria-hidden="true">person_add</span>Invitar</button>
+  </form>
+  <p class="muted small">Tu ID es <code>{{ uid }}</code> (pásaselo si prefieres que te invite ella). La otra persona tiene que haber
+    entrado al menos una vez en autospoti y aceptar la invitación desde esta página.</p>
+</section>
+{% endblock %}

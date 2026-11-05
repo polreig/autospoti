@@ -126,6 +126,12 @@ def add_plays(
     normalized = [PlayRow(*row) for row in rows]
     if not normalized:
         return 0, 0
+    with conn.transaction():
+        inserted = _insert_batch(conn, user_id, normalized, source)
+    return inserted, len(normalized) - inserted
+
+
+def _insert_batch(conn: Database, user_id: str, normalized: list[PlayRow], source: str) -> int:
     conn.execute(_INCOMING_TABLE)
     conn.execute("DELETE FROM incoming")
     conn.copy_rows("incoming", _INCOMING_COLUMNS, [
@@ -152,8 +158,7 @@ def add_plays(
     )
     inserted = cur.rowcount
     conn.execute("DELETE FROM incoming")
-    conn.commit()
-    return inserted, len(normalized) - inserted
+    return inserted
 
 
 def rows_from_recently_played(items: list[dict]) -> list[PlayRow]:

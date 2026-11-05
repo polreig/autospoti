@@ -1,0 +1,5 @@
+# Uso en tu PC: todo lo de requirements.txt + la app Streamlit, el servidor local de la web y los tests.
+-r requirements.txt
+streamlit>=1.40,<2
+uvicorn>=0.30
+httpx>=0.27

@@ -85,9 +85,10 @@ def _run_cloud(conn, record_only: bool) -> int:
         return 1
     accounts = tokens.list_accounts(conn)
     if not accounts:
-        print("ERROR: no hay ninguna cuenta de Spotify en la base de datos. "
-              "Define el secret SPOTIFY_CACHE (contenido de tu .cache) para la primera ejecución.")
-        return 1
+        # Normal hasta el primer login en la web: no es un fallo (no llenar el correo de avisos).
+        print("Todavía no hay cuentas: entra una vez en la web con Spotify (o define el secret "
+              "SPOTIFY_CACHE) y el registro empezará solo.")
+        return 0
     errors = failures = 0
     for user_id in accounts:
         prefix = f"[{user_id}] " if len(accounts) > 1 else ""

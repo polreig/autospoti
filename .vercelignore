@@ -1,0 +1,9 @@
+data/
+tests/
+scripts/
+.streamlit/
+.github/
+*.db
+*.zip
+.env
+.cache

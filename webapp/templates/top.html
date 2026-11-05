@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Top de Spotify{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div class="kicker">Crear playlists</div>
+  <h1>Top de Spotify</h1>
+  <p class="muted">Los rankings que calcula Spotify. Solo ofrece tres periodos aproximados.</p>
+</header>
+<form class="card" method="post" action="/top/create" data-busy="Creando playlist…">
+  <div class="segmented" role="radiogroup" aria-label="Periodo">
+    {% for value, label in ranges.items() %}
+      <label><input type="radio" name="time_range" value="{{ value }}" {% if loop.first %}checked{% endif %}
+        data-name="Top Spotify - {{ label }}"><span>{{ label }}</span></label>
+    {% endfor %}
+  </div>
+  <div class="row">
+    <label class="field grow"><span>Nombre</span><input type="text" name="name" value="Top Spotify - {{ ranges['short_term'] }}" maxlength="100" required data-name-target></label>
+    <label class="field"><span>Canciones</span><input type="number" name="limit" min="10" max="100" step="10" value="50"></label>
+  </div>
+  <button class="btn btn-primary"><span class="ms" aria-hidden="true">playlist_add</span>Crear playlist del ranking</button>
+</form>
+{% endblock %}

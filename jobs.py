@@ -125,12 +125,14 @@ def update_recipe(
     spec: "smart.Spec",
     tz: tzinfo,
     index: "PlaylistIndex | None" = None,
+    daily: bool = True,
 ) -> JobOutcome:
     """Recalcula una receta y escribe su playlist. Sin canciones no toca la playlist."""
     tracks = smart.build_tracks(conn, user_id, spec, tz)
     if not tracks:
         return JobOutcome(name, None, "Ninguna canción cumple los filtros ahora mismo.")
-    description = f"{spec.describe()} (autospoti, se actualiza cada día)."
+    suffix = "autospoti, se actualiza cada día" if daily else "autospoti"
+    description = f"{spec.describe()} ({suffix})."
     return JobOutcome(name, write_playlist(sp, conn, user_id, name, [t.uri for t in tracks],
                                            description, index))
 

@@ -1,0 +1,12 @@
+{# Tabla de canciones de la vista previa. rows: [{pos, name, artist, plays, last?}] #}
+<div class="table-wrap">
+  <table class="table">
+    <thead><tr><th class="num">#</th><th>Canción</th><th>Artista</th><th class="num">Escuchas</th>{% if rows and rows[0].last is defined %}<th>Última vez</th>{% endif %}</tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr><td class="num muted">{{ r.pos }}</td><td>{{ r.name }}</td><td class="muted">{{ r.artist }}</td>
+        <td class="num">{{ r.plays }}</td>{% if r.last is defined %}<td class="muted">{{ r.last }}</td>{% endif %}</tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>

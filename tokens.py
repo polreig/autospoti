@@ -65,6 +65,26 @@ def load_token(db: Database, user_id: str) -> "dict | None":
     return decrypt_token(row[0]) if row else None
 
 
+def save_profile(db: Database, user_id: str, display_name: "str | None") -> None:
+    db.execute(
+        "INSERT INTO profiles (user_id, display_name, updated_at) VALUES (?, ?, ?) "
+        "ON CONFLICT (user_id) DO UPDATE SET display_name = excluded.display_name, "
+        "updated_at = excluded.updated_at",
+        (user_id, display_name, int(time.time())),
+    )
+    db.commit()
+
+
+def display_names(db: Database, user_ids: list[str]) -> dict[str, str]:
+    """Nombre visible de cada cuenta (o su ID si nunca ha iniciado sesión aquí)."""
+    if not user_ids:
+        return {}
+    marks = ", ".join("?" for _ in user_ids)
+    cur = db.execute(f"SELECT user_id, display_name FROM profiles WHERE user_id IN ({marks})", tuple(user_ids))
+    found = {row[0]: row[1] for row in cur.fetchall() if row[1]}
+    return {uid: found.get(uid, uid) for uid in user_ids}
+
+
 def delete_token(db: Database, user_id: str) -> None:
     """Olvida la cuenta: sin token, el cron deja de registrar sus escuchas."""
     db.execute("DELETE FROM spotify_tokens WHERE user_id = ?", (user_id,))

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Redescubrimientos{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div class="kicker">Crear playlists</div>
+  <h1>Redescubrimientos</h1>
+  <p class="muted">Canciones que escuchaste mucho y llevas tiempo sin poner. Si vuelves a escucharlas,
+    salen de la lista en la siguiente actualización.</p>
+</header>
+
+{% set epoch = q.get("epoch", "todo") %}
+<form class="card filters-card" method="get" action="/rediscover"
+      hx-get="/rediscover" hx-target="#main" hx-select="#main" hx-swap="outerHTML"
+      hx-trigger="change delay:250ms, submit" hx-push-url="true">
+  <div class="segmented" role="radiogroup" aria-label="Época">
+    {% for value, label in [("todo", "Cualquier momento"), ("anio", "Un año concreto")] %}
+      <label><input type="radio" name="epoch" value="{{ value }}" {% if epoch == value %}checked{% endif %}><span>{{ label }}</span></label>
+    {% endfor %}
+  </div>
+  <div class="row">
+    {% if epoch == "anio" %}
+    <label class="field"><span>Año</span><select name="year">
+      {% for y in years %}<option value="{{ y }}" {% if q.int("year", years[1] if years|length > 1 else years[0], 2008, today.year) == y %}selected{% endif %}>{{ y }}</option>{% endfor %}
+    </select></label>
+    {% endif %}
+    <label class="field"><span>Sin escuchar desde hace</span><select name="forgotten">
+      {% for m, label in [(3, "3 meses"), (6, "6 meses"), (12, "1 año"), (18, "18 meses"), (24, "2 años"), (36, "3 años")] %}
+        <option value="{{ m }}" {% if q.int("forgotten", 6, 1, 120) == m %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select></label>
+    <label class="field"><span>Escuchas mínimas entonces</span><input type="number" name="min_plays" min="1" max="500" value="{{ q.int('min_plays', 5, 1, 500) }}"></label>
+    <label class="field"><span>Canciones</span><input type="number" name="limit" min="10" max="500" step="10" value="{{ q.int('limit', 50, 10, 500) }}"></label>
+  </div>
+  <label class="check"><input type="checkbox" name="avoid" value="1" {% if q.get('avoid') == '1' %}checked{% endif %}><span>Evitar las que solías saltar</span></label>
+  <noscript><button class="btn">Ver</button></noscript>
+</form>
+
+<section id="preview" class="card">
+  {% if error %}
+    <div class="flash flash-error" role="alert"><span class="ms" aria-hidden="true">error</span><span>{{ error }}</span></div>
+  {% elif rows %}
+    <p class="describe"><span class="ms" aria-hidden="true">filter_alt</span>{{ describe }}</p>
+    {% include "_create.html" %}
+    {% include "_tracks.html" %}
+  {% else %}
+    <p class="muted">No hay canciones olvidadas con estos criterios. Prueba a bajar las escuchas mínimas,
+      acortar el tiempo sin escucharlas o <a href="/import">importar más historial</a>.</p>
+  {% endif %}
+</section>
+{% endblock %}

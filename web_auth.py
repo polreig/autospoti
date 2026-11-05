@@ -27,7 +27,7 @@ from config import ConfigError, required_env
 from db import Database
 from spotify_core import build_auth_manager
 
-DEFAULT_WEB_REDIRECT_URI = "http://127.0.0.1:8501/"
+DEFAULT_WEB_REDIRECT_URI = "http://127.0.0.1:8000/callback"  # web FastAPI en local (uvicorn)
 STATE_MAX_AGE = 15 * 60  # segundos para completar el login en Spotify
 
 
@@ -108,4 +108,6 @@ def complete_login(db: Database, code: str, state: str) -> LoginResult:
     if not is_allowed(user_id):
         raise LoginError(f"La cuenta '{user_id}' no tiene acceso a esta app.")
     tokens.save_token(db, user_id, token_info)
-    return LoginResult(user_id=user_id, display_name=me.get("display_name") or user_id)
+    display_name = me.get("display_name") or user_id
+    tokens.save_profile(db, user_id, display_name)
+    return LoginResult(user_id=user_id, display_name=display_name)

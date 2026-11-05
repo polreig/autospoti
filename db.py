@@ -7,6 +7,7 @@ El resto del código escribe SQL portable con ``?`` como marcador; aquí se trad
 from __future__ import annotations
 
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -56,6 +57,24 @@ SCHEMA_STATEMENTS = (
         PRIMARY KEY (user_id, name)
     )
     """,
+    # Nombre visible de cada cuenta (se guarda al iniciar sesión; evita llamar a Spotify).
+    """
+    CREATE TABLE IF NOT EXISTS profiles (
+        user_id      TEXT   PRIMARY KEY,
+        display_name TEXT,
+        updated_at   BIGINT NOT NULL
+    )
+    """,
+    # Enlaces de pareja para las mezclas (blend.py): owner invita, partner acepta.
+    """
+    CREATE TABLE IF NOT EXISTS blend_links (
+        owner       TEXT   NOT NULL,
+        partner     TEXT   NOT NULL,
+        status      TEXT   NOT NULL,      -- 'pending' | 'accepted'
+        created_at  BIGINT NOT NULL,
+        PRIMARY KEY (owner, partner)
+    )
+    """,
     # Tokens de Spotify por usuario (cifrados, ver tokens.py). Solo en modo nube.
     """
     CREATE TABLE IF NOT EXISTS spotify_tokens (
@@ -76,6 +95,7 @@ class Database:
 
     def __init__(self, raw: Any, dialect: str, target: str, check_same_thread: bool = True):
         self.raw = raw
+        self._in_tx = False
         self.dialect = dialect          # "sqlite" | "postgres"
         self._target = target
         self._check_same_thread = check_same_thread
@@ -121,13 +141,40 @@ class Database:
             raise
 
     def commit(self) -> None:
-        self.raw.commit()
+        if not self._in_tx:  # dentro de transaction() confirma el bloque al salir
+            self.raw.commit()
 
     def rollback(self) -> None:
         self.raw.rollback()
 
+    @contextmanager
+    def transaction(self):
+        """Agrupa varias sentencias en una transacción. Imprescindible con el pooler de Neon
+        (pgbouncer en modo transacción): fuera de una transacción, cada sentencia puede ir a
+        otra sesión del servidor y una tabla temporal "desaparece" entre sentencias."""
+        if self._in_tx:
+            yield self
+            return
+        self._in_tx = True
+        try:
+            if self.is_postgres:
+                with self.raw.transaction():
+                    yield self
+            else:
+                try:
+                    yield self
+                    self.raw.commit()
+                except Exception:
+                    self._rollback_quietly()
+                    raise
+        finally:
+            self._in_tx = False
+
     def _rollback_quietly(self) -> None:
         # En Postgres, tras un error la transacción queda abortada hasta hacer rollback.
+        # Dentro de transaction() la deshace el propio bloque al propagarse la excepción.
+        if self._in_tx and self.is_postgres:
+            return
         try:
             self.raw.rollback()
         except Exception:  # noqa: BLE001

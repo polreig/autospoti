@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Mis recetas{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div class="kicker">Crear playlists</div>
+  <h1>Mis recetas</h1>
+  <p class="muted">Playlists que se recalculan solas cada día con sus filtros. Se crean marcando
+    «Mantenerla actualizada cada día» al crear una playlist.</p>
+</header>
+{% if not items %}
+<div class="callout"><span class="ms" aria-hidden="true">auto_awesome</span>
+  <div>Todavía no tienes recetas. Prueba con <a href="/rediscover">Redescubrimientos</a> o una
+    <a href="/custom">playlist personalizada</a>.</div></div>
+{% else %}
+<form method="post" action="/recipes/run-all" data-busy="Actualizando…" class="toolbar">
+  <button class="btn"><span class="ms" aria-hidden="true">autorenew</span>Actualizar todas ahora</button>
+</form>
+<div class="recipes">
+  {% for r in items %}
+  <article class="card recipe">
+    <h2>{{ r.name }}</h2>
+    <p class="muted">{{ r.describe }}{% if r.ok %} · {{ r.limit }} canciones{% endif %}</p>
+    <div class="actions">
+      {% if r.ok %}
+      <form method="post" action="/recipes/run" data-busy="Actualizando…"><input type="hidden" name="name" value="{{ r.name }}">
+        <button class="btn btn-sm"><span class="ms" aria-hidden="true">sync</span>Actualizar</button></form>
+      {% endif %}
+      <form method="post" action="/recipes/delete" data-confirm="¿Borrar la receta «{{ r.name }}»? La playlist se queda en tu Spotify.">
+        <input type="hidden" name="name" value="{{ r.name }}">
+        <button class="btn btn-ghost btn-sm"><span class="ms" aria-hidden="true">delete</span>Borrar receta</button></form>
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
