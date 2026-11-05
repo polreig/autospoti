@@ -14,13 +14,18 @@ class FakeSpotify:
     def __init__(self, pages):
         self._pages = pages
         self.calls = []
+        self.listings = 0
 
     def _page(self, i):
         has_next = i + 1 < len(self._pages)
         return {"items": self._pages[i], "next": "url" if has_next else None, "_i": i}
 
     def current_user_playlists(self, limit=50):
+        self.listings += 1
         return self._page(0)
+
+    def playlist_add_items(self, pid, uris):
+        self.calls.append(("add", pid, list(uris)))
 
     def next(self, page):
         return self._page(page["_i"] + 1)
@@ -71,14 +76,40 @@ class PlaylistTests(unittest.TestCase):
         self.assertIsNone(res.playlist_id)
         self.assertEqual(sp.calls, [])
 
-    def test_description_truncated_and_tracks_capped(self):
+    def test_description_truncated_and_long_lists_written_in_batches(self):
         sp = FakeSpotify([[]])
-        uris = [f"spotify:track:{i}" for i in range(150)]
-        spotify_core.create_or_update_playlist(sp, "me", "L", uris, "x" * 500)
+        uris = [f"spotify:track:{i}" for i in range(250)]
+        res = spotify_core.create_or_update_playlist(sp, "me", "L", uris, "x" * 500)
         create = [c for c in sp.calls if c[0] == "create"][0]
-        replace = [c for c in sp.calls if c[0] == "replace"][0]
+        writes = [c for c in sp.calls if c[0] in ("replace", "add")]
         self.assertEqual(len(create[3]), 300)
-        self.assertEqual(len(replace[2]), 100)
+        # Primero se sustituye (vacía lo anterior) y luego se añade el resto, en orden.
+        self.assertEqual([(c[0], len(c[2])) for c in writes], [("replace", 100), ("add", 100), ("add", 50)])
+        self.assertEqual([u for c in writes for u in c[2]], uris)
+        self.assertEqual(res.track_count, 250)
+
+    def test_shared_index_lists_playlists_once(self):
+        sp = FakeSpotify([[{"id": "a", "name": "A", "owner": {"id": "me"}}]])
+        index = spotify_core.PlaylistIndex(sp, "me")
+        for name in ("A", "B", "B"):
+            spotify_core.create_or_update_playlist(sp, "me", name, ["spotify:track:1"], index=index)
+        self.assertEqual(sp.listings, 1)
+        # "B" se crea una vez; la segunda vez se reconoce gracias al índice compartido.
+        self.assertEqual(len([c for c in sp.calls if c[0] == "create"]), 1)
+
+    def test_known_id_survives_rename(self):
+        sp = FakeSpotify([[{"id": "p1", "name": "Renombrada por mí", "owner": {"id": "me"}}]])
+        res = spotify_core.create_or_update_playlist(sp, "me", "Original", ["spotify:track:1"],
+                                                     playlist_id="p1")
+        self.assertEqual(res.playlist_id, "p1")
+        self.assertFalse(res.created)
+
+    def test_known_id_ignored_if_no_longer_owned(self):
+        sp = FakeSpotify([[{"id": "p1", "name": "Original", "owner": {"id": "otro"}}]])
+        res = spotify_core.create_or_update_playlist(sp, "me", "Original", ["spotify:track:1"],
+                                                     playlist_id="p1")
+        self.assertTrue(res.created)
+        self.assertEqual(res.playlist_id, "NEW")
 
 
 class SecretsTests(unittest.TestCase):

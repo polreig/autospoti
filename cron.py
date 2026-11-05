@@ -34,8 +34,11 @@ def run(record_only: bool = False, api_only: bool = False) -> int:
 
     conn = None if api_only else history.connect()
     try:
+        if conn is not None:
+            # Historial migrado del esquema antiguo (sin usuario): pasa a ser del dueño.
+            history.claim_orphan_plays(conn, user_id)
         if record_only:
-            new, dup = jobs.record_recent_plays(sp, conn)
+            new, dup = jobs.record_recent_plays(sp, conn, user_id)
             print(f"Registro: {new} nuevas, {dup} ya existentes.")
             return 0
         failures = 0

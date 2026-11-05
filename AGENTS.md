@@ -21,4 +21,5 @@ App en Python para crear playlists de Spotify (Streamlit + spotipy + SQLite).
 - La API de Spotify (feb 2026) usa `/items` en playlists; spotipy >= 2.26. No usar endpoints antiguos `/tracks`.
 - Listas vacías nunca deben vaciar una playlist existente.
 - Todo instante se guarda en UTC (segundos Unix); la zona (`APP_TIMEZONE`) solo se aplica al interpretar fechas.
+- Toda consulta o escritura del historial lleva `user_id` (preparado para varios usuarios). Las playlists se escriben con `jobs.write_playlist` (recuerda su ID en `managed_playlists`) y compartiendo un `PlaylistIndex` por ejecución.
 - Añadir un test en `tests/` por cada cambio de lógica. Respuestas y textos de la interfaz en español.

@@ -25,13 +25,17 @@ def entry(ts, uri="spotify:track:aaa", ms=200000, name="Song", artist="Artist"):
     }
 
 
-def load(conn, data):
-    return history_import.import_export_bytes(conn, json.dumps(data).encode())
+ME = "me"
+
+
+def load(conn, data, user_id=ME):
+    return history_import.import_export_bytes(conn, user_id, json.dumps(data).encode())
 
 
 class HistoryTests(unittest.TestCase):
     def setUp(self):
         self.conn = history.connect(":memory:")
+        self.addCleanup(self.conn.close)
 
     def test_import_filters_and_dedups(self):
         data = [
@@ -54,23 +58,62 @@ class HistoryTests(unittest.TestCase):
         load(self.conn, [entry("2022-03-05T18:00:00Z")])
         stats = load(self.conn, [entry("2022-03-05T18:00:00Z")])
         self.assertEqual(stats.inserted, 0)
-        self.assertEqual(history.coverage(self.conn).total, 1)
+        self.assertEqual(history.coverage(self.conn, ME).total, 1)
 
     def test_invalid_json_raises(self):
         with self.assertRaises(ValueError):
-            history_import.import_export_bytes(self.conn, b"no es json")
+            history_import.import_export_bytes(self.conn, ME, b"no es json")
         with self.assertRaises(ValueError):
-            history_import.import_export_bytes(self.conn, b'{"a": 1}')
+            history_import.import_export_bytes(self.conn, ME, b'{"a": 1}')
 
     def test_api_and_export_overlap_not_double_counted(self):
         load(self.conn, [entry("2024-01-01T10:00:30Z")])
         rows = [(history.parse_ts("2024-01-01T10:00:35Z"), "spotify:track:aaa", "S", "A", "Al", None)]
-        self.assertEqual(history.add_plays(self.conn, rows, "api"), (0, 1))
+        self.assertEqual(history.add_plays(self.conn, ME, rows, "api"), (0, 1))
 
     def test_same_track_far_apart_counts_twice(self):
         load(self.conn, [entry("2024-01-01T10:00:00Z")])
         rows = [(history.parse_ts("2024-01-01T12:00:00Z"), "spotify:track:aaa", "S", "A", "Al", None)]
-        self.assertEqual(history.add_plays(self.conn, rows, "api"), (1, 0))
+        self.assertEqual(history.add_plays(self.conn, ME, rows, "api"), (1, 0))
+
+    def test_users_are_isolated(self):
+        load(self.conn, [entry("2024-01-01T10:00:00Z")], user_id="ana")
+        load(self.conn, [entry("2024-01-01T10:00:00Z"), entry("2024-01-02T10:00:00Z")], user_id="ME")
+        self.assertEqual(history.coverage(self.conn, "ana").total, 1)
+        self.assertEqual(history.coverage(self.conn, "ME").total, 2)
+        # La misma escucha en otra cuenta no es "duplicada" ni cruza el filtro de solapamiento.
+        rows = [(history.parse_ts("2024-01-01T10:00:30Z"), "spotify:track:aaa", "S", "A", "Al", None)]
+        self.assertEqual(history.add_plays(self.conn, "nadie", rows, "api"), (1, 0))
+        start, end = dateranges.range_for_month(2024, 1, MADRID)
+        self.assertEqual(history.top_tracks(self.conn, "ana", start, end, 10)[0].plays, 1)
+
+    def test_empty_user_id_rejected(self):
+        with self.assertRaises(ValueError):
+            history.add_plays(self.conn, "", [], "api")
+
+    def test_export_extra_fields_are_stored(self):
+        data = [dict(entry("2024-01-01T10:00:00Z"), skipped=True, reason_end="fwdbtn",
+                     shuffle=False, platform="android"),
+                dict(entry("2024-01-01T11:00:00Z"), skipped=None)]
+        load(self.conn, data)
+        rows = self.conn.execute(
+            "SELECT skipped, reason_end, shuffle, platform FROM plays ORDER BY ts").fetchall()
+        self.assertEqual(rows, [(1, "fwdbtn", 0, "android"), (None, None, None, None)])
+
+    def test_bulk_import_is_fast_and_dedups_against_api(self):
+        import time
+
+        base = history.parse_ts("2020-01-01T00:00:00Z")
+        api_rows = [(base + 600 * i + 30, f"spotify:track:{i % 500}", "S", "A", "Al", None)
+                    for i in range(0, 20000, 2)]
+        history.add_plays(self.conn, ME, api_rows, "api")
+        export_rows = [(base + 600 * i, f"spotify:track:{i % 500}", "S", "A", "Al", 60000)
+                       for i in range(20000)]
+        started = time.perf_counter()
+        inserted, dup = history.add_plays(self.conn, ME, export_rows, "export")
+        self.assertLess(time.perf_counter() - started, 5)
+        # La mitad ya estaba (registrada por API a 30 s): no se cuenta dos veces.
+        self.assertEqual((inserted, dup), (10000, 10000))
 
     def test_top_tracks_range_and_min_ms(self):
         data = [
@@ -83,7 +126,7 @@ class HistoryTests(unittest.TestCase):
         ]
         load(self.conn, data)
         start, end = dateranges.range_for_month(2022, 3, MADRID)
-        top = history.top_tracks(self.conn, start, end, 10, min_ms=30000)
+        top = history.top_tracks(self.conn, ME, start, end, 10, min_ms=30000)
         self.assertEqual([(t.uri, t.plays) for t in top],
                          [("spotify:track:a", 2), ("spotify:track:b", 1)])
 
@@ -98,6 +141,64 @@ class HistoryTests(unittest.TestCase):
         rows = history.rows_from_recently_played(items)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][3], "X, Y")
+
+    def test_managed_playlist_ids_roundtrip(self):
+        self.assertIsNone(history.get_playlist_id(self.conn, ME, "L"))
+        history.save_playlist_id(self.conn, ME, "L", "p1")
+        history.save_playlist_id(self.conn, ME, "L", "p2")
+        self.assertEqual(history.get_playlist_id(self.conn, ME, "L"), "p2")
+        self.assertIsNone(history.get_playlist_id(self.conn, "otro", "L"))
+
+
+class MigrationTests(unittest.TestCase):
+    OLD_SCHEMA = """
+        CREATE TABLE plays (ts INTEGER NOT NULL, track_uri TEXT NOT NULL, track_name TEXT,
+            artist TEXT, album TEXT, ms_played INTEGER, source TEXT NOT NULL,
+            PRIMARY KEY (ts, track_uri));
+        CREATE INDEX idx_plays_uri_ts ON plays (track_uri, ts);
+        INSERT INTO plays VALUES (1700000000, 'spotify:track:a', 'A', 'X', 'Al', 60000, 'export');
+        INSERT INTO plays VALUES (1700000500, 'spotify:track:b', 'B', 'Y', 'Al', NULL, 'api');
+    """
+
+    def setUp(self):
+        import sqlite3
+        import tempfile
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "history.db"
+        old = sqlite3.connect(self.path)
+        old.executescript(self.OLD_SCHEMA)
+        old.close()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_old_database_is_migrated_with_backup(self):
+        conn = history.connect(self.path)
+        try:
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], history.SCHEMA_VERSION)
+            self.assertEqual(history.coverage(conn, history.ORPHAN_USER).total, 2)
+            self.assertTrue(self.path.with_suffix(".v1-backup.db").exists())
+            self.assertEqual(history.claim_orphan_plays(conn, "me"), 2)
+            self.assertEqual(history.coverage(conn, "me").total, 2)
+            self.assertEqual(history.coverage(conn, history.ORPHAN_USER).total, 0)
+        finally:
+            conn.close()
+        # Volver a abrir no migra de nuevo ni pierde datos.
+        conn = history.connect(self.path)
+        try:
+            self.assertEqual(history.coverage(conn, "me").total, 2)
+        finally:
+            conn.close()
+
+    def test_orphans_not_claimed_when_db_has_other_users(self):
+        conn = history.connect(self.path)
+        try:
+            history.add_plays(conn, "ana", [(1, "spotify:track:z", "Z", "Z", "Z", None)], "api")
+            self.assertEqual(history.claim_orphan_plays(conn, "me"), 0)
+            self.assertEqual(history.coverage(conn, history.ORPHAN_USER).total, 2)
+        finally:
+            conn.close()
 
 
 class DateRangeTests(unittest.TestCase):
