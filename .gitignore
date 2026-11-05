@@ -8,6 +8,8 @@ data/
 *.db
 Streaming_History_*.json
 Spotify Extended Streaming History/
+my_spotify_data*
+*.zip
 
 # Salidas temporales de depuración
 *.log
