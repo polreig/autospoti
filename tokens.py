@@ -65,6 +65,12 @@ def load_token(db: Database, user_id: str) -> "dict | None":
     return decrypt_token(row[0]) if row else None
 
 
+def delete_token(db: Database, user_id: str) -> None:
+    """Olvida la cuenta: sin token, el cron deja de registrar sus escuchas."""
+    db.execute("DELETE FROM spotify_tokens WHERE user_id = ?", (user_id,))
+    db.commit()
+
+
 def list_accounts(db: Database) -> list[str]:
     """Usuarios de Spotify con token guardado (orden estable)."""
     return [r[0] for r in db.execute("SELECT user_id FROM spotify_tokens ORDER BY user_id").fetchall()]

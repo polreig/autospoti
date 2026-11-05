@@ -31,6 +31,24 @@ Sin `DATABASE_URL`, el workflow funciona como antes: solo actualiza una vez al d
 
 Nota: GitHub desactiva los workflows programados de repos publicos tras 60 dias sin actividad en el repo; si pasa, reactivalo desde la pestana Actions.
 
+## La web (Streamlit Community Cloud, gratis)
+
+Con `DATABASE_URL`, la web pide **iniciar sesion con Spotify**: cada persona entra con su cuenta, su token se guarda cifrado en la base de datos y el registro horario empieza a incluirla automaticamente.
+
+1. En [share.streamlit.io](https://share.streamlit.io) crea una app: repositorio `polreig/autospoti`, rama `main`, archivo `autoplaylist.py`, Python 3.12. Elige la URL (por ejemplo `https://autospoti-pol.streamlit.app`).
+2. En **Settings > Secrets** de la app pega (formato TOML):
+   ```toml
+   SPOTIPY_CLIENT_ID = "..."
+   SPOTIPY_CLIENT_SECRET = "..."
+   DATABASE_URL = "postgresql://...?sslmode=require"
+   WEB_REDIRECT_URI = "https://autospoti-pol.streamlit.app/"
+   ALLOWED_SPOTIFY_IDS = "tu_id_de_spotify"
+   ```
+3. En el [dashboard de Spotify](https://developer.spotify.com/dashboard), en tu app > **Settings > Redirect URIs**, anade exactamente la misma `WEB_REDIRECT_URI`.
+4. Abre la web y pulsa **Iniciar sesion con Spotify** (se abre en otra pestana).
+
+Para que entre otra persona: anadela en **User Management** del dashboard de Spotify (Development Mode) y su ID en `ALLOWED_SPOTIFY_IDS`. Desde **Tu cuenta** cada uno puede cerrar sesion u olvidar su cuenta (deja de registrarse lo que escucha).
+
 ## Tests
 
 ```powershell
