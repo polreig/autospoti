@@ -13,6 +13,7 @@ App en Python para crear playlists de Spotify (Streamlit + spotipy + SQLite).
 - `config.py` carga `.env`; `spotify_core.py` = API de Spotify (sin Streamlit)
 - `db.py` = conexión y esquema: SQLite `data/history.db` en local, Postgres si hay `DATABASE_URL`. SQL portable con `?` (se traduce a `%s`); nada de `INSERT OR IGNORE`/`PRAGMA` fuera de `db.py`
 - `tokens.py` = tokens de Spotify cifrados en la BD (modo nube); `history.py` = consultas del historial
+- `smart.py` = recetas (`Spec` en JSON, tabla `recipes`) con filtros y redescubrimientos; `stats.py` = cálculos del panel; `charts.py` = gráficos Altair (una serie, color de acento, tooltip). Filtros de hora/día/mes en Python con la zona horaria, nunca en SQL
 - `web_auth.py` = login OAuth de la web (state firmado con HMAC, lista `ALLOWED_SPOTIFY_IDS`), sin Streamlit
 - `autoplaylist.py` = interfaz: una función `page_*(ctx)` por página registrada en `_pages()`; tema en `.streamlit/config.toml`. Cada página nueva debe añadirse a `test_every_page_renders`
 - `history_import.py` = export de Spotify; `dateranges.py` = rangos

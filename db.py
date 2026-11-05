@@ -46,6 +46,16 @@ SCHEMA_STATEMENTS = (
         PRIMARY KEY (user_id, name)
     )
     """,
+    # Recetas: playlists definidas por filtros (smart.Spec en JSON) que se regeneran cada día.
+    """
+    CREATE TABLE IF NOT EXISTS recipes (
+        user_id     TEXT   NOT NULL,
+        name        TEXT   NOT NULL,
+        spec        TEXT   NOT NULL,
+        updated_at  BIGINT NOT NULL,
+        PRIMARY KEY (user_id, name)
+    )
+    """,
     # Tokens de Spotify por usuario (cifrados, ver tokens.py). Solo en modo nube.
     """
     CREATE TABLE IF NOT EXISTS spotify_tokens (

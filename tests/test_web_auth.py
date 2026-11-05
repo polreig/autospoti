@@ -193,8 +193,19 @@ class AppTests(unittest.TestCase):
             import autoplaylist
             import history
 
+            import smart
+
             conn = history.connect(os.environ["DATABASE_URL"])
-            history.add_plays(conn, "pol", [(1700000000, "spotify:track:a", "A", "X", "Al", 60000)], "export")
+            import time
+
+            now = int(time.time())
+            # Escuchas de los últimos ~14 meses (estadísticas) + una favorita olvidada (redescubrimientos).
+            rows = [(now - 86400 * 7 * i, f"spotify:track:{i % 5}", f"T{i % 5}", f"Art{i % 3}", "Al", 60000)
+                    for i in range(60)]
+            rows += [(now - 86400 * 400 - 600 * i, "spotify:track:old", "Vieja", "ArtV", "Al", 60000)
+                     for i in range(6)]
+            history.add_plays(conn, "pol", rows, "export")
+            history.save_recipe(conn, "pol", "Receta", smart.Spec(days=30).to_json())
             ctx = autoplaylist.Ctx(sp=mock.Mock(), conn=conn, user_id="pol", display_name="Pol",
                                    tz=ZoneInfo("Europe/Madrid"))
             try:
@@ -202,10 +213,16 @@ class AppTests(unittest.TestCase):
             finally:
                 conn.close()
 
-        for page_name in ("page_home", "page_custom", "page_import", "page_spotify_top", "page_account"):
+        for page_name in ("page_home", "page_stats", "page_custom", "page_rediscover", "page_recipes",
+                          "page_import", "page_spotify_top", "page_account"):
             at = AppTest.from_function(render, args=(page_name,), default_timeout=30).run()
             self.assertFalse(at.exception, f"{page_name}: {[e.value for e in at.exception]}")
             self.assertTrue(at.title, page_name)
+            if page_name == "page_stats":
+                self.assertEqual(len(at.get("vega_lite_chart")), 3, "deben pintarse los 3 gráficos")
+                self.assertEqual(len(at.metric), 4)
+            if page_name == "page_rediscover":
+                self.assertIn("Vieja", at.dataframe[0].value["Canción"].tolist())
 
     def test_local_mode_uses_cache_file_client(self):
         with mock.patch.dict(os.environ, {"DATABASE_URL": "", "HISTORY_DB_PATH": os.environ["DATABASE_URL"]}), \

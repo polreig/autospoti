@@ -20,8 +20,8 @@ import sys
 import history
 import jobs
 import tokens
-from config import ConfigError, use_db_tokens
-from spotify_core import AuthRequiredError, friendly_error, get_spotify_client
+from config import ConfigError, get_timezone, use_db_tokens
+from spotify_core import AuthRequiredError, PlaylistIndex, friendly_error, get_spotify_client
 
 
 def _print_outcomes(outcomes: list[jobs.JobOutcome], prefix: str = "") -> int:
@@ -42,7 +42,10 @@ def _run_user(sp, conn, user_id: str, record_only: bool, prefix: str = "") -> in
         new, dup = jobs.record_recent_plays(sp, conn, user_id)
         print(f"{prefix}Registro: {new} nuevas, {dup} ya existentes.")
         return 0
-    return _print_outcomes(jobs.update_auto_playlists(sp, conn, user_id), prefix)
+    index = PlaylistIndex(sp, user_id)  # compartido por las automáticas y las recetas
+    outcomes = jobs.update_auto_playlists(sp, conn, user_id, index=index)
+    outcomes += jobs.update_recipes(sp, conn, user_id, get_timezone(), index=index)
+    return _print_outcomes(outcomes, prefix)
 
 
 def _run_api_only() -> int:

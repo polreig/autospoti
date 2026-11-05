@@ -141,7 +141,24 @@ class HistoryTests(unittest.TestCase):
         ]
         rows = history.rows_from_recently_played(items)
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0][3], "X, Y")
+        self.assertEqual(rows[0][3], "X")  # solo el artista principal, como en el export
+
+    def test_recipes_crud(self):
+        history.save_recipe(self.conn, ME, "B", '{"limit": 10}')
+        history.save_recipe(self.conn, ME, "A", '{"limit": 5}')
+        history.save_recipe(self.conn, ME, "A", '{"limit": 7}')
+        history.save_recipe(self.conn, "otro", "C", "{}")
+        self.assertEqual(history.list_recipes(self.conn, ME), [("A", '{"limit": 7}'), ("B", '{"limit": 10}')])
+        history.delete_recipe(self.conn, ME, "A")
+        self.assertEqual([n for n, _ in history.list_recipes(self.conn, ME)], ["B"])
+
+    def test_fetch_plays_and_uris_since(self):
+        load(self.conn, [entry("2024-01-02T10:00:00Z", uri="spotify:track:b"),
+                         entry("2024-01-01T10:00:00Z", uri="spotify:track:a")])
+        events = history.fetch_plays(self.conn, ME, 0, 2_000_000_000)
+        self.assertEqual([e.track_uri for e in events], ["spotify:track:a", "spotify:track:b"])
+        self.assertEqual(history.uris_played_since(self.conn, ME, history.parse_ts("2024-01-02T00:00:00Z")),
+                         {"spotify:track:b"})
 
     def test_managed_playlist_ids_roundtrip(self):
         self.assertIsNone(history.get_playlist_id(self.conn, ME, "L"))

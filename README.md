@@ -2,6 +2,11 @@
 
 Aplicacion Streamlit para crear y mantener playlists automaticas de Spotify, con un registro propio de todo lo que escuchas.
 
+* **Estadisticas**: escuchas y horas, evolucion por mes, artistas y canciones mas escuchados y un mapa de cuando escuchas (dia x hora).
+* **Playlist personalizada**: por periodo (ultimos N dias, un mes, fechas o todo) con filtros por meses, dias de la semana, franja horaria, artistas, escuchas minimas y "evitar las que sueles saltar".
+* **Redescubrimientos**: canciones que escuchaste mucho y llevas meses sin poner.
+* **Mis recetas**: cualquier playlist personalizada o de redescubrimientos puede guardarse para que se recalcule sola cada dia.
+
 ## Abrir la aplicacion en local
 
 En Windows, haz doble clic en [Abrir Autospoti.bat](./Abrir%20Autospoti.bat). El script inicia Streamlit y abre la aplicacion en el navegador.

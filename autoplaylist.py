@@ -18,8 +18,11 @@ from dataclasses import dataclass
 
 import streamlit as st
 
+import charts
 import history
 import jobs
+import smart
+import stats
 import tokens
 import web_auth
 from config import ConfigError, get_min_play_ms, get_timezone, history_enabled, use_db_tokens
@@ -253,14 +256,88 @@ def page_import(ctx: Ctx) -> None:
             f"{format_ts(cov.last_ts, ctx.tz)}).")
 
 
+def _data_version(ctx: Ctx) -> tuple:
+    """Cambia cuando hay escuchas nuevas: invalida las cachés de cálculo."""
+    cov = history.coverage(ctx.conn, ctx.user_id)
+    return cov.total, cov.last_ts
+
+
+@st.cache_data(ttl=900, show_spinner="Calculando estadísticas...", max_entries=32)
+def _cached_stats(_conn, _tz, user_id: str, tz_name: str, start_ts: int, end_ts: int,
+                  min_ms: int, version: tuple):
+    return stats.compute(history.fetch_plays(_conn, user_id, start_ts, end_ts), _tz, min_ms=min_ms)
+
+
+@st.cache_data(ttl=900, show_spinner=False, max_entries=64)
+def _cached_build(_conn, _tz, user_id: str, tz_name: str, spec_json: str, version: tuple):
+    return smart.build_tracks(_conn, user_id, smart.Spec.from_json(spec_json), _tz)
+
+
+def _split_names(text: str) -> list[str]:
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def _years(ctx: Ctx) -> list[int]:
+    cov = history.coverage(ctx.conn, ctx.user_id)
+    this_year = datetime.date.today().year
+    first = datetime.datetime.fromtimestamp(cov.first_ts, ctx.tz).year if cov.first_ts else this_year
+    return list(range(this_year, max(MIN_YEAR, first) - 1, -1))
+
+
+def _playlist_actions(ctx: Ctx, name: str, spec: smart.Spec, tracks: list, key: str) -> None:
+    """Botón crear/actualizar + opción de guardarla como receta (se recalcula cada día)."""
+    keep = st.checkbox("Mantenerla actualizada cada día", key=f"{key}_keep",
+                       help="Se guarda como receta en **Mis recetas**: cada día se recalcula con "
+                            "estos mismos filtros y se actualiza la playlist.")
+    if st.button("Crear / actualizar playlist", type="primary", icon=":material/playlist_add:",
+                 disabled=not name.strip() or not tracks, key=f"{key}_go"):
+        try:
+            result = jobs.write_playlist(ctx.sp, ctx.conn, ctx.user_id, name.strip(),
+                                         [t.uri for t in tracks], f"{spec.describe()} (autospoti).")
+        except Exception as exc:  # noqa: BLE001
+            st.error(friendly_error(exc))
+            return
+        if keep:
+            history.save_recipe(ctx.conn, ctx.user_id, name.strip(), spec.to_json())
+        state = "creada" if result.created else "actualizada"
+        extra = " Guardada en **Mis recetas**." if keep else ""
+        st.success(f"Playlist '{name.strip()}' {state} con {result.track_count} canciones. "
+                   f"[Abrir en Spotify]({result.url}){extra}")
+
+
+def _tracks_table(tracks: list, last_seen: "dict[str, int] | None" = None, tz=None) -> None:
+    rows = []
+    for i, t in enumerate(tracks, 1):
+        row = {"#": i, "Canción": t.name, "Artista": t.artist, "Escuchas": t.plays}
+        if last_seen is not None:
+            row["Última vez"] = format_ts(last_seen.get(t.uri), tz)[:10]
+        rows.append(row)
+    st.dataframe(rows, hide_index=True, width="stretch")
+
+
 def page_custom(ctx: Ctx) -> None:
-    st.title("Playlist de un periodo")
-    st.caption("Lo que más escuchaste en las fechas que elijas (registro propio + historial importado). "
+    st.title("Playlist personalizada")
+    st.caption("Lo que más escuchaste según tus filtros (registro propio + historial importado). "
                f"Zona horaria: {ctx.tz}")
     today = datetime.date.today()
-    mode = st.segmented_control("Periodo", ["Un mes", "Rango de fechas"], default="Un mes")
+    mode = st.segmented_control("Periodo", ["Últimos días", "Un mes", "Fechas", "Todo"],
+                                default="Últimos días") or "Últimos días"
+    spec = smart.Spec(kind="top", min_seconds=get_min_play_ms() // 1000)
 
-    if mode == "Rango de fechas":
+    if mode == "Últimos días":
+        spec.range_type = "last_days"
+        spec.days = int(st.number_input("Días", min_value=1, max_value=3650, value=30, step=1))
+        label = f"últimos {spec.days} días"
+    elif mode == "Un mes":
+        col1, col2 = st.columns(2)
+        month = col1.selectbox("Mes", range(1, 13), index=today.month - 1,
+                               format_func=lambda m: MESES_ES[m - 1])
+        year = col2.number_input("Año", min_value=MIN_YEAR, max_value=today.year, value=today.year, step=1)
+        start_ts, end_ts = range_for_month(int(year), int(month), ctx.tz)
+        last_day = datetime.datetime.fromtimestamp(end_ts - 1, ctx.tz).date()
+        spec.range_type, spec.start, spec.end = "fixed", f"{int(year)}-{int(month):02d}-01", last_day.isoformat()
+        label = month_label(int(year), int(month))
+    elif mode == "Fechas":
         col1, col2 = st.columns(2)
         start = col1.date_input("Desde", value=today - datetime.timedelta(days=30),
                                 min_value=datetime.date(MIN_YEAR, 1, 1), max_value=today)
@@ -269,46 +346,179 @@ def page_custom(ctx: Ctx) -> None:
         if end < start:
             st.error("La fecha final es anterior a la inicial.")
             return
-        start_ts, end_ts = range_for_dates(start, end, ctx.tz)
+        spec.range_type, spec.start, spec.end = "fixed", start.isoformat(), end.isoformat()
         label = f"{start:%d/%m/%Y} - {end:%d/%m/%Y}"
     else:
+        spec.range_type = "all"
+        label = "de siempre"
+
+    with st.expander("Filtros avanzados", icon=":material/tune:"):
+        if mode != "Un mes":
+            spec.months = st.pills("Meses", list(range(1, 13)), selection_mode="multi",
+                                   format_func=lambda m: MESES_ES[m - 1][:3],
+                                   help="Ej.: junio, julio y agosto + «Todo» = lo que más escuchas en verano.") or []
+        spec.weekdays = st.pills("Días de la semana", list(range(7)), selection_mode="multi",
+                                 format_func=lambda d: smart.DIAS[d].capitalize()) or []
+        franjas = st.pills("Franja horaria", list(smart.FRANJAS), selection_mode="multi",
+                           format_func=lambda f: f"{f.capitalize()} ({smart.FRANJAS[f].start}-"
+                                                 f"{smart.FRANJAS[f].stop}h)") or []
+        spec.hours = sorted({h for f in franjas for h in smart.FRANJAS[f]})
         col1, col2 = st.columns(2)
-        month = col1.selectbox("Mes", range(1, 13), index=today.month - 1,
-                               format_func=lambda m: MESES_ES[m - 1])
-        year = col2.number_input("Año", min_value=MIN_YEAR, max_value=today.year, value=today.year, step=1)
-        start_ts, end_ts = range_for_month(int(year), int(month), ctx.tz)
-        label = month_label(int(year), int(month))
+        spec.include_artists = _split_names(col1.text_input("Solo estos artistas", placeholder="separados por comas"))
+        spec.exclude_artists = _split_names(col2.text_input("Sin estos artistas", placeholder="separados por comas"))
+        col1, col2 = st.columns(2)
+        spec.min_plays = int(col1.number_input("Escuchas mínimas por canción", min_value=1, max_value=500, value=1))
+        spec.min_seconds = int(col2.number_input("Segundos mínimos para contar", min_value=0, max_value=300,
+                                                 value=spec.min_seconds, step=5,
+                                                 help="Escuchas más cortas no cuentan (saltos)."))
+        spec.avoid_skipped = st.checkbox("Evitar las canciones que sueles saltar",
+                                         help="Fuera las que saltaste más de la mitad de las veces "
+                                              "(dato del historial importado).")
 
-    col1, col2, col3 = st.columns([2, 1, 1])
+    col1, col2 = st.columns([3, 1])
     name = col1.text_input("Nombre de la playlist", value=f"Mi selección - {label}")
-    limit = col2.number_input("Canciones", min_value=10, max_value=500, value=50, step=10)
-    min_seconds = col3.number_input("Segundos mínimos", min_value=0, max_value=300,
-                                    value=get_min_play_ms() // 1000, step=5,
-                                    help="Escuchas más cortas no cuentan (saltos).")
+    spec.limit = int(col2.number_input("Canciones", min_value=10, max_value=500, value=50, step=10))
+    st.caption(spec.describe())
 
-    tracks = history.top_tracks(ctx.conn, ctx.user_id, start_ts, end_ts, int(limit),
-                                min_ms=int(min_seconds) * 1000)
+    tracks = _cached_build(ctx.conn, ctx.tz, ctx.user_id, str(ctx.tz), spec.to_json(), _data_version(ctx))
     if not tracks:
-        st.warning("No hay reproducciones en ese periodo. Importa tu historial en **Importar historial**.")
+        st.warning("Ninguna canción cumple estos filtros. Prueba con un periodo más amplio o importa tu "
+                   "historial en **Importar historial**.")
         return
-    if st.button("Crear / actualizar playlist", type="primary", icon=":material/playlist_add:",
-                 disabled=not name.strip()):
-        try:
-            result = jobs.write_playlist(
-                ctx.sp, ctx.conn, ctx.user_id, name.strip(), [t.uri for t in tracks],
-                f"Más escuchado: {label} (generado por autospoti).",
-            )
-        except Exception as exc:  # noqa: BLE001
-            st.error(friendly_error(exc))
-        else:
-            state = "creada" if result.created else "actualizada"
-            st.success(f"Playlist '{name}' {state} con {result.track_count} canciones. "
-                       f"[Abrir en Spotify]({result.url})")
-    st.dataframe(
-        [{"#": i, "Canción": t.name, "Artista": t.artist, "Escuchas": t.plays}
-         for i, t in enumerate(tracks, 1)],
-        hide_index=True, width="stretch",
+    _playlist_actions(ctx, name, spec, tracks, key="custom")
+    _tracks_table(tracks)
+
+
+def page_rediscover(ctx: Ctx) -> None:
+    st.title("Redescubrimientos")
+    st.caption("Canciones que escuchaste mucho y llevas tiempo sin poner. Si vuelves a escucharlas, "
+               "salen de la lista en la siguiente actualización.")
+    spec = smart.Spec(kind="rediscover", range_type="all", min_plays=5,
+                      min_seconds=get_min_play_ms() // 1000)
+    col1, col2 = st.columns(2)
+    epoch = col1.segmented_control("Época", ["Cualquier momento", "Un año concreto"],
+                                   default="Cualquier momento") or "Cualquier momento"
+    label = ""
+    if epoch == "Un año concreto":
+        year = col2.selectbox("Año", _years(ctx))
+        spec.range_type, spec.start, spec.end = "fixed", f"{year}-01-01", f"{year}-12-31"
+        label = f" {year}"
+    spec.forgotten_months = st.select_slider(
+        "Sin escuchar desde hace", options=[3, 6, 12, 18, 24, 36], value=6,
+        format_func=lambda m: f"{m} meses" if m % 12 else (f"{m // 12} año" + ("s" if m > 12 else "")),
     )
+    col1, col2, col3 = st.columns([2, 1, 1])
+    name = col1.text_input("Nombre de la playlist", value=f"Redescubrimientos{label}")
+    spec.min_plays = int(col2.number_input("Escuchas mínimas entonces", min_value=1, max_value=500, value=5))
+    spec.limit = int(col3.number_input("Canciones", min_value=10, max_value=500, value=50, step=10))
+    spec.avoid_skipped = st.checkbox("Evitar las que solías saltar")
+
+    tracks = _cached_build(ctx.conn, ctx.tz, ctx.user_id, str(ctx.tz), spec.to_json(), _data_version(ctx))
+    if not tracks:
+        st.info("No hay canciones olvidadas con estos criterios. Prueba a bajar las escuchas mínimas, "
+                "acortar el tiempo sin escucharlas o importar más historial.")
+        return
+    _playlist_actions(ctx, name, spec, tracks, key="rediscover")
+    _tracks_table(tracks, smart.last_played(ctx.conn, ctx.user_id, [t.uri for t in tracks]), ctx.tz)
+
+
+def page_stats(ctx: Ctx) -> None:
+    st.title("Estadísticas")
+    if history.coverage(ctx.conn, ctx.user_id).total == 0:
+        st.info("Aún no hay escuchas. Importa tu historial en **Importar historial** para ver tus estadísticas.")
+        return
+    today = datetime.date.today()
+    col1, col2 = st.columns([3, 1])
+    choice = col1.segmented_control("Periodo", ["30 días", "Este año", "Un año", "Todo"],
+                                    default="Este año") or "Este año"
+    if choice == "30 días":  # días naturales: el rango no cambia a cada segundo (caché estable)
+        start_ts, end_ts = range_for_dates(today - datetime.timedelta(days=29), today, ctx.tz)
+    elif choice == "Este año":
+        start_ts, end_ts = range_for_dates(datetime.date(today.year, 1, 1), today, ctx.tz)
+    elif choice == "Un año":
+        year = col2.selectbox("Año", _years(ctx))
+        start_ts, end_ts = range_for_dates(datetime.date(year, 1, 1), datetime.date(year, 12, 31), ctx.tz)
+    else:
+        start_ts, end_ts = range_for_dates(datetime.date(MIN_YEAR, 1, 1), today, ctx.tz)
+
+    result = _cached_stats(ctx.conn, ctx.tz, ctx.user_id, str(ctx.tz), start_ts, end_ts,
+                           get_min_play_ms(), _data_version(ctx))
+    if result.plays == 0:
+        st.info("No hay escuchas en este periodo.")
+        return
+
+    def fmt(n) -> str:
+        return f"{n:,.0f}".replace(",", ".")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Escuchas", fmt(result.plays))
+    c2.metric("Horas" + (" (aprox.)" if result.hours_estimated else ""), fmt(result.hours),
+              help="Del registro por API no se sabe cuánto duró cada escucha: se estima con la media."
+              if result.hours_estimated else None)
+    c3.metric("Canciones distintas", fmt(result.tracks))
+    c4.metric("Artistas distintos", fmt(result.artists))
+
+    with st.container(border=True):
+        st.subheader("Escuchas por " + ("día" if result.period_unit == "day" else "mes"))
+        st.altair_chart(charts.period_bars(result.by_period, result.period_unit), width="stretch")
+
+    col1, col2 = st.columns(2)
+    with col1, st.container(border=True):
+        st.subheader("Artistas más escuchados")
+        st.altair_chart(charts.ranked_bars(result.top_artists, "Artista"), width="stretch")
+    with col2, st.container(border=True):
+        st.subheader("Cuándo escuchas")
+        st.caption("Día de la semana y hora. Más intenso = más escuchas.")
+        st.altair_chart(charts.week_heatmap(result.heatmap), width="stretch")
+
+    with st.container(border=True):
+        st.subheader("Canciones más escuchadas")
+        st.dataframe([{"#": i, "Canción": name, "Artista": artist, "Escuchas": n}
+                      for i, (name, artist, n) in enumerate(result.top_tracks, 1)],
+                     hide_index=True, width="stretch")
+
+    with st.expander("Ver los datos de los gráficos", icon=":material/table:"):
+        st.dataframe([{"Periodo": k, "Escuchas": n} for k, n in result.by_period], hide_index=True)
+        st.dataframe([{"Artista": a, "Escuchas": n} for a, n in result.top_artists], hide_index=True)
+
+
+def page_recipes(ctx: Ctx) -> None:
+    st.title("Mis recetas")
+    st.caption("Playlists que se recalculan solas cada día con sus filtros (junto con las automáticas). "
+               "Se crean marcando «Mantenerla actualizada cada día» en Playlist personalizada o "
+               "Redescubrimientos.")
+    recipes = history.list_recipes(ctx.conn, ctx.user_id)
+    if not recipes:
+        st.info("Todavía no tienes recetas.")
+        return
+    if st.button("Actualizar todas ahora", icon=":material/autorenew:"):
+        with st.spinner("Actualizando..."):
+            try:
+                outcomes = jobs.update_recipes(ctx.sp, ctx.conn, ctx.user_id, ctx.tz)
+            except Exception as exc:  # noqa: BLE001
+                st.error(friendly_error(exc))
+                outcomes = []
+        for outcome in outcomes:
+            _show_outcome(outcome)
+    for i, (name, raw) in enumerate(recipes):
+        with st.container(border=True):
+            st.subheader(name)
+            try:
+                spec = smart.Spec.from_json(raw)
+                st.caption(f"{spec.describe()} · {spec.limit} canciones")
+            except (ValueError, TypeError) as exc:
+                spec = None
+                st.error(f"Receta no válida: {exc}")
+            col1, col2, _ = st.columns([1, 1, 3])
+            if spec is not None and col1.button("Actualizar", key=f"recipe_run_{i}", icon=":material/sync:"):
+                try:
+                    _show_outcome(jobs.update_recipe(ctx.sp, ctx.conn, ctx.user_id, name, spec, ctx.tz))
+                except Exception as exc:  # noqa: BLE001
+                    st.error(friendly_error(exc))
+            if col2.button("Borrar receta", key=f"recipe_del_{i}", icon=":material/delete:",
+                           help="Deja de actualizarse. La playlist se queda en tu Spotify."):
+                history.delete_recipe(ctx.conn, ctx.user_id, name)
+                st.rerun()
 
 
 def page_spotify_top(ctx: Ctx) -> None:
@@ -361,20 +571,29 @@ def page_account(ctx: Ctx) -> None:
 
 # ---------------------------------------------------------------- arranque
 
-def _pages(ctx: Ctx, cloud: bool) -> list:
+def _pages(ctx: Ctx, cloud: bool) -> dict:
     def page(fn, title, icon, path, **kw):
         return st.Page(lambda: fn(ctx), title=title, icon=icon, url_path=path, **kw)
 
-    pages = [page(page_home, "Inicio", ":material/home:", "inicio", default=True)]
-    if ctx.conn is not None:
-        pages += [
-            page(page_custom, "Playlist de un periodo", ":material/date_range:", "periodo"),
-            page(page_import, "Importar historial", ":material/upload_file:", "importar"),
+    has_history = ctx.conn is not None
+    music = [page(page_home, "Inicio", ":material/home:", "inicio", default=True)]
+    create = []
+    settings = []
+    if has_history:
+        music.append(page(page_stats, "Estadísticas", ":material/insights:", "estadisticas"))
+        create += [
+            page(page_custom, "Playlist personalizada", ":material/tune:", "personalizada"),
+            page(page_rediscover, "Redescubrimientos", ":material/history:", "redescubrimientos"),
+            page(page_recipes, "Mis recetas", ":material/auto_awesome:", "recetas"),
         ]
-    pages.append(page(page_spotify_top, "Top de Spotify", ":material/trophy:", "top-spotify"))
+        settings.append(page(page_import, "Importar historial", ":material/upload_file:", "importar"))
+    create.append(page(page_spotify_top, "Top de Spotify", ":material/trophy:", "top-spotify"))
     if cloud:
-        pages.append(page(page_account, "Tu cuenta", ":material/account_circle:", "cuenta"))
-    return pages
+        settings.append(page(page_account, "Tu cuenta", ":material/account_circle:", "cuenta"))
+    sections = {"Tu música": music, "Crear playlists": create}
+    if settings:
+        sections["Ajustes"] = settings
+    return sections
 
 
 def main() -> None:
