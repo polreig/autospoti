@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Tu cuenta{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div class="kicker">Ajustes</div>
+  <h1>Tu cuenta</h1>
+  <p class="muted">Conectado como <strong>{{ display_name }}</strong> · tu ID de Spotify es <code>{{ uid }}</code>.</p>
+</header>
+<section class="grid-2">
+  <div class="card">
+    <h2>Cerrar sesión</h2>
+    <p class="muted">Sales de la web en este navegador. Tus escuchas se siguen registrando cada hora.</p>
+    <form method="post" action="/logout"><button class="btn"><span class="ms" aria-hidden="true">logout</span>Cerrar sesión</button></form>
+  </div>
+  <div class="card">
+    <h2>Olvidar mi cuenta</h2>
+    <p class="muted">Borra tu token de Spotify guardado: deja de registrarse lo que escuchas y se cierra la
+      sesión en todos tus dispositivos. Tu historial y tus playlists no se tocan; puedes volver cuando quieras.</p>
+    <form method="post" action="/account/forget">
+      <label class="check"><input type="checkbox" name="confirm" value="1" required><span>Entiendo que dejará de registrarse lo que escucho</span></label>
+      <button class="btn btn-danger"><span class="ms" aria-hidden="true">person_remove</span>Olvidar mi cuenta</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

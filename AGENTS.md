@@ -1,9 +1,11 @@
 # autospoti
 
-App en Python para crear playlists de Spotify (Streamlit + spotipy + SQLite).
+App en Python para crear playlists de Spotify: web FastAPI (Vercel) + spotipy + Postgres/SQLite; app Streamlit solo para uso local.
 
 ## Comandos
-- App web: `streamlit run autoplaylist.py`
+- Instalar todo en local: `python -m pip install -r requirements-local.txt` (`requirements.txt` = nube, sin Streamlit)
+- Web: `uvicorn webapp.main:create_app --factory --reload` (Vercel entra por `api/index.py`)
+- App Streamlit (local, una cuenta): `streamlit run autoplaylist.py`
 - Autorizar Spotify (una vez): `python auth.py`
 - Tarea programada: `python cron.py` (todo) o `python cron.py --record` (solo registrar)
 - Importar historial exportado: `python import_history.py "<carpeta o .json>"`
@@ -13,6 +15,11 @@ App en Python para crear playlists de Spotify (Streamlit + spotipy + SQLite).
 - `config.py` carga `.env`; `spotify_core.py` = API de Spotify (sin Streamlit)
 - `db.py` = conexión y esquema: SQLite `data/history.db` en local, Postgres si hay `DATABASE_URL`. SQL portable con `?` (se traduce a `%s`); nada de `INSERT OR IGNORE`/`PRAGMA` fuera de `db.py`
 - `tokens.py` = tokens de Spotify cifrados en la BD (modo nube); `history.py` = consultas del historial
+- `smart.py` = recetas (`Spec` en JSON, tabla `recipes`) con filtros y redescubrimientos; `stats.py` = cálculos del panel; `charts.py` = gráficos Altair (una serie, color de acento, tooltip). Filtros de hora/día/mes en Python con la zona horaria, nunca en SQL
+- `blend.py` = enlaces de pareja con consentimiento (`blend_links`) y mezclas; nunca leer el historial de otra cuenta sin `blend.is_linked`
+- `webapp/` = web FastAPI: `main.py` (rutas), `forms.py` (query params -> Spec), `templates/` (Jinja2, autoescape), `static/`. Toda ruta privada llama a `current_user()`; los POST pasan el control de mismo origen; las canciones se recalculan en el servidor, nunca se aceptan del navegador
+- `web_auth.py` = login OAuth de la web (state firmado con HMAC, lista `ALLOWED_SPOTIFY_IDS`), sin Streamlit
+- `autoplaylist.py` = interfaz Streamlit (local): una función `page_*(ctx)` por página registrada en `_pages()`; tema en `.streamlit/config.toml`. Cada página nueva (en Streamlit o en `webapp/`) debe añadirse a su `test_every_page_renders`
 - `history_import.py` = export de Spotify; `dateranges.py` = rangos
 - `jobs.py` = lógica compartida por la app y `cron.py`; `autoplaylist.py` = solo interfaz
 

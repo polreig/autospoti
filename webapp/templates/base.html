@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>{% block title %}autospoti{% endblock %} · autospoti</title>
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..24,400..500,0..1,0&display=block" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
+  {% block head %}{% endblock %}
+</head>
+<body>
+{% if uid %}
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="/"><span class="brand-mark">◉</span> autospoti</a>
+    <nav class="nav" aria-label="Secciones">
+      {% for section, items in NAV %}
+        <div class="nav-section">{{ section }}</div>
+        {% for href, label, icon in items %}
+          <a href="{{ href }}" class="nav-link{% if active == href %} is-active{% endif %}"
+             {% if active == href %}aria-current="page"{% endif %}>
+            <span class="ms" aria-hidden="true">{{ icon }}</span>{{ label }}
+            {% if href == "/blend" and pending_invites %}<span class="badge">{{ pending_invites }}</span>{% endif %}
+          </a>
+        {% endfor %}
+      {% endfor %}
+    </nav>
+    <div class="who">
+      <span class="avatar" aria-hidden="true">{{ (display_name or "?")[:1] | upper }}</span>
+      <span class="who-name">{{ display_name }}</span>
+    </div>
+  </aside>
+  <main class="main" id="main">
+    {% for f in flashes %}
+      <div class="flash flash-{{ f.kind }}" role="status">
+        <span class="ms" aria-hidden="true">{{ {"ok": "check_circle", "warn": "info", "error": "error"}[f.kind] }}</span>
+        <span>{{ f.text }}{% if f.url %} <a href="{{ f.url }}" target="_blank" rel="noopener">Abrir en Spotify ↗</a>{% endif %}</span>
+      </div>
+    {% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% else %}
+  {% block public %}{% endblock %}
+{% endif %}
+<script src="/static/app.js" defer></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

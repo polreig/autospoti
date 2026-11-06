@@ -1,0 +1,15 @@
+{# Formulario "crear playlist" de la vista previa. Necesita: name, spec_json, rows. #}
+<form class="create" method="post" action="/playlists/create" data-busy="Creando playlist…">
+  <input type="hidden" name="spec" value="{{ spec_json }}">
+  <label class="field grow">
+    <span>Nombre de la playlist</span>
+    <input type="text" name="name" value="{{ name }}" maxlength="100" required>
+  </label>
+  <label class="check">
+    <input type="checkbox" name="keep" value="1">
+    <span>Mantenerla actualizada cada día</span>
+  </label>
+  <button class="btn btn-primary" {% if not rows %}disabled{% endif %}>
+    <span class="ms" aria-hidden="true">playlist_add</span>Crear / actualizar ({{ rows | length }})
+  </button>
+</form>

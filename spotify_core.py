@@ -39,16 +39,21 @@ def _restore_cache_from_env() -> None:
 
 
 def build_auth_manager(
-    open_browser: bool = False, cache_handler: "CacheHandler | None" = None
+    open_browser: bool = False,
+    cache_handler: "CacheHandler | None" = None,
+    redirect_uri: "str | None" = None,
 ) -> SpotifyOAuth:
-    """``cache_handler`` None = fichero ``.cache`` local (restaurado de SPOTIFY_CACHE si hace falta)."""
+    """``cache_handler`` None = fichero ``.cache`` local (restaurado de SPOTIFY_CACHE si hace falta).
+
+    ``redirect_uri``: la de la app web (login); por defecto la de ``auth.py``.
+    """
     if cache_handler is None:
         _restore_cache_from_env()
         cache_handler = CacheFileHandler(cache_path=str(CACHE_PATH))
     return SpotifyOAuth(
         client_id=required_env("SPOTIPY_CLIENT_ID"),
         client_secret=required_env("SPOTIPY_CLIENT_SECRET"),
-        redirect_uri=os.environ.get("SPOTIPY_REDIRECT_URI", "").strip() or DEFAULT_REDIRECT_URI,
+        redirect_uri=redirect_uri or os.environ.get("SPOTIPY_REDIRECT_URI", "").strip() or DEFAULT_REDIRECT_URI,
         scope=SCOPE,
         cache_handler=cache_handler,
         open_browser=open_browser,

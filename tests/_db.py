@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import history  # noqa: E402
 
-TABLES = ("plays", "managed_playlists", "spotify_tokens")
+TABLES = ("plays", "managed_playlists", "spotify_tokens", "recipes", "profiles", "blend_links")
 
 
 def fresh_db():

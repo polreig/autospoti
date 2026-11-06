@@ -126,6 +126,12 @@ def add_plays(
     normalized = [PlayRow(*row) for row in rows]
     if not normalized:
         return 0, 0
+    with conn.transaction():
+        inserted = _insert_batch(conn, user_id, normalized, source)
+    return inserted, len(normalized) - inserted
+
+
+def _insert_batch(conn: Database, user_id: str, normalized: list[PlayRow], source: str) -> int:
     conn.execute(_INCOMING_TABLE)
     conn.execute("DELETE FROM incoming")
     conn.copy_rows("incoming", _INCOMING_COLUMNS, [
@@ -152,8 +158,7 @@ def add_plays(
     )
     inserted = cur.rowcount
     conn.execute("DELETE FROM incoming")
-    conn.commit()
-    return inserted, len(normalized) - inserted
+    return inserted
 
 
 def rows_from_recently_played(items: list[dict]) -> list[PlayRow]:
@@ -166,12 +171,14 @@ def rows_from_recently_played(items: list[dict]) -> list[PlayRow]:
         # Se ignoran episodios de podcast y archivos locales (sin URI de canción).
         if not uri or not str(uri).startswith("spotify:track:") or not played_at:
             continue
-        artists = ", ".join(a.get("name", "") for a in track.get("artists", []) if a.get("name"))
+        # Solo el artista principal: así coincide con el export (un único artista) y las
+        # estadísticas por artista no separan "X" de "X, Y".
+        names = [a.get("name") for a in track.get("artists", []) if a.get("name")]
         rows.append(PlayRow(
             ts=parse_ts(played_at),
             track_uri=uri,
             track_name=track.get("name"),
-            artist=artists or None,
+            artist=names[0] if names else None,
             album=(track.get("album") or {}).get("name"),
             ms_played=None,  # la API no informa de cuánto se escuchó
         ))
@@ -215,6 +222,55 @@ def top_tracks(
     )
     return [TopTrack(uri=r[0], name=r[1] or "(sin título)", artist=r[2] or "", plays=r[3])
             for r in cur.fetchall()]
+
+
+class PlayEvent(NamedTuple):
+    """Una escucha tal cual, para estadísticas y filtros que se calculan en Python
+    (hora/día de la semana dependen de la zona horaria)."""
+    ts: int
+    track_uri: str
+    track_name: "str | None"
+    artist: "str | None"
+    ms_played: "int | None"
+    skipped: "int | None"
+
+
+def fetch_plays(conn: Database, user_id: str, start_ts: int, end_ts: int) -> list[PlayEvent]:
+    """Todas las escuchas de ``user_id`` en [start_ts, end_ts), en orden cronológico."""
+    cur = conn.execute(
+        "SELECT ts, track_uri, track_name, artist, ms_played, skipped FROM plays "
+        "WHERE user_id = ? AND ts >= ? AND ts < ? ORDER BY ts",
+        (user_id, start_ts, end_ts),
+    )
+    return [PlayEvent(*row) for row in cur.fetchall()]
+
+
+def uris_played_since(conn: Database, user_id: str, since_ts: int) -> set[str]:
+    """Canciones con alguna escucha (aunque sea corta) desde ``since_ts``."""
+    cur = conn.execute(
+        "SELECT DISTINCT track_uri FROM plays WHERE user_id = ? AND ts >= ?", (user_id, since_ts)
+    )
+    return {row[0] for row in cur.fetchall()}
+
+
+def save_recipe(conn: Database, user_id: str, name: str, spec_json: str) -> None:
+    conn.execute(
+        "INSERT INTO recipes (user_id, name, spec, updated_at) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT (user_id, name) DO UPDATE SET spec = excluded.spec, updated_at = excluded.updated_at",
+        (user_id, name, spec_json, int(datetime.now(timezone.utc).timestamp())),
+    )
+    conn.commit()
+
+
+def list_recipes(conn: Database, user_id: str) -> list[tuple[str, str]]:
+    """[(nombre, spec_json)] ordenadas por nombre."""
+    cur = conn.execute("SELECT name, spec FROM recipes WHERE user_id = ? ORDER BY name", (user_id,))
+    return [(row[0], row[1]) for row in cur.fetchall()]
+
+
+def delete_recipe(conn: Database, user_id: str, name: str) -> None:
+    conn.execute("DELETE FROM recipes WHERE user_id = ? AND name = ?", (user_id, name))
+    conn.commit()
 
 
 def get_playlist_id(conn: Database, user_id: str, name: str) -> "str | None":

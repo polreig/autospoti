@@ -16,6 +16,6 @@ python -m streamlit run autoplaylist.py
 if errorlevel 1 (
     echo.
     echo Autospoti no pudo iniciarse. Comprueba que las dependencias esten instaladas:
-    echo python -m pip install -r requirements.txt
+    echo python -m pip install -r requirements-local.txt
     pause
 )

@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import auth, config, cron, dateranges, db, history, history_import, import_history, jobs, spotify_core, tokens  # noqa: E402,F401
+import auth, blend, charts, config, cron, dateranges, db, history, history_import, import_history, jobs, smart, spotify_core, stats, tokens, web_auth  # noqa: E402,F401
 import spotipy  # noqa: E402
 from spotipy.oauth2 import SpotifyOAuth  # noqa: E402
 

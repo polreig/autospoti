@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Entrar{% endblock %}
+{% block public %}
+<main class="login">
+  <div class="login-card">
+    <div class="kicker">autospoti</div>
+    <h1>Tus playlists, a partir de lo que de verdad escuchas</h1>
+    <p class="lead">Registra tus escuchas cada hora, mira tus estadísticas, recupera canciones olvidadas
+      y crea playlists de cualquier periodo que se mantienen al día solas.</p>
+    {% if error %}<div class="flash flash-warn" role="status"><span class="ms" aria-hidden="true">info</span><span>{{ error }}</span></div>{% endif %}
+    <a class="btn btn-primary btn-lg" href="/login"><span class="ms" aria-hidden="true">login</span>Iniciar sesión con Spotify</a>
+    <p class="muted small">Solo pueden entrar las cuentas autorizadas. Tu sesión se recuerda 30 días en este navegador.</p>
+  </div>
+</main>
+{% endblock %}

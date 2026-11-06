@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Estadísticas{% endblock %}
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/vega@6" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-lite@6.4.1" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-embed@7" defer></script>
+{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div class="kicker">Tu música</div>
+  <h1>Estadísticas</h1>
+</header>
+
+{% if not has_any %}
+<div class="callout"><span class="ms" aria-hidden="true">upload_file</span>
+  <div>Aún no hay escuchas. <a href="/import">Importa tu historial</a> para ver tus estadísticas.</div></div>
+{% else %}
+<form class="filters" method="get" action="/stats" data-autosubmit>
+  <div class="segmented" role="radiogroup" aria-label="Periodo">
+    {% for value, label in [("30d", "30 días"), ("anio_actual", "Este año"), ("anio", "Un año"), ("todo", "Todo")] %}
+      <label><input type="radio" name="period" value="{{ value }}" {% if period == value %}checked{% endif %}><span>{{ label }}</span></label>
+    {% endfor %}
+  </div>
+  {% if period == "anio" %}
+  <label class="field"><span>Año</span>
+    <select name="year">{% for y in years %}<option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>{% endfor %}</select>
+  </label>
+  {% endif %}
+  <noscript><button class="btn">Ver</button></noscript>
+</form>
+
+{% if s.plays == 0 %}
+<div class="callout"><span class="ms" aria-hidden="true">info</span><div>No hay escuchas en este periodo.</div></div>
+{% else %}
+<section class="tiles">
+  <div class="tile"><div class="tile-label">Escuchas</div><div class="tile-value">{{ "{:,.0f}".format(s.plays).replace(",", ".") }}</div></div>
+  <div class="tile"><div class="tile-label">Horas{% if s.hours_estimated %} <span class="muted" title="El registro por API no dice cuánto duró cada escucha: se estima con la media.">(aprox.)</span>{% endif %}</div>
+    <div class="tile-value">{{ "{:,.0f}".format(s.hours).replace(",", ".") }}</div></div>
+  <div class="tile"><div class="tile-label">Canciones distintas</div><div class="tile-value">{{ "{:,.0f}".format(s.tracks).replace(",", ".") }}</div></div>
+  <div class="tile"><div class="tile-label">Artistas distintos</div><div class="tile-value">{{ "{:,.0f}".format(s.artists).replace(",", ".") }}</div></div>
+</section>
+
+<section class="card">
+  <h2>Escuchas por {{ "día" if s.period_unit == "day" else "mes" }}</h2>
+  <div class="chart" data-spec="period" role="img" aria-label="Escuchas por {{ 'día' if s.period_unit == 'day' else 'mes' }}"></div>
+</section>
+
+<section class="grid-2">
+  <div class="card">
+    <h2>Artistas más escuchados</h2>
+    <div class="chart" data-spec="artists" role="img" aria-label="Ranking de artistas"></div>
+  </div>
+  <div class="card">
+    <h2>Cuándo escuchas</h2>
+    <p class="muted small">Día de la semana y hora. Más intenso = más escuchas.</p>
+    <div class="chart" data-spec="heatmap" role="img" aria-label="Escuchas por día de la semana y hora"></div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Canciones más escuchadas</h2>
+  <div class="table-wrap"><table class="table">
+    <thead><tr><th class="num">#</th><th>Canción</th><th>Artista</th><th class="num">Escuchas</th></tr></thead>
+    <tbody>{% for name, artist, n in s.top_tracks %}<tr><td class="num muted">{{ loop.index }}</td><td>{{ name }}</td><td class="muted">{{ artist }}</td><td class="num">{{ n }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+
+<details class="card details">
+  <summary>Ver los datos de los gráficos</summary>
+  <div class="grid-2">
+    <div class="table-wrap"><table class="table"><thead><tr><th>Periodo</th><th class="num">Escuchas</th></tr></thead>
+      <tbody>{% for k, n in s.by_period %}<tr><td>{{ k }}</td><td class="num">{{ n }}</td></tr>{% endfor %}</tbody></table></div>
+    <div class="table-wrap"><table class="table"><thead><tr><th>Artista</th><th class="num">Escuchas</th></tr></thead>
+      <tbody>{% for a, n in s.top_artists %}<tr><td>{{ a }}</td><td class="num">{{ n }}</td></tr>{% endfor %}</tbody></table></div>
+  </div>
+</details>
+<script type="application/json" id="chart-specs">{{ specs | tojson }}</script>
+{% endif %}
+{% endif %}
+{% endblock %}

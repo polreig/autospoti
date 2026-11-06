@@ -3,9 +3,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from datetime import tzinfo
+
 import spotipy
 
 import history
+import smart
 from db import Database
 from config import get_min_play_ms
 from dateranges import range_last_days
@@ -114,11 +117,50 @@ def _update_spotify_rankings(ctx: _Ctx) -> list[JobOutcome]:
     ]
 
 
+def update_recipe(
+    sp: spotipy.Spotify,
+    conn: Database,
+    user_id: str,
+    name: str,
+    spec: "smart.Spec",
+    tz: tzinfo,
+    index: "PlaylistIndex | None" = None,
+    daily: bool = True,
+) -> JobOutcome:
+    """Recalcula una receta y escribe su playlist. Sin canciones no toca la playlist."""
+    tracks = smart.build_tracks(conn, user_id, spec, tz)
+    if not tracks:
+        return JobOutcome(name, None, "Ninguna canción cumple los filtros ahora mismo.")
+    suffix = "autospoti, se actualiza cada día" if daily else "autospoti"
+    description = f"{spec.describe()} ({suffix})."
+    return JobOutcome(name, write_playlist(sp, conn, user_id, name, [t.uri for t in tracks],
+                                           description, index))
+
+
+def update_recipes(
+    sp: spotipy.Spotify,
+    conn: Database,
+    user_id: str,
+    tz: tzinfo,
+    index: "PlaylistIndex | None" = None,
+) -> list[JobOutcome]:
+    """Regenera todas las recetas guardadas del usuario. Una receta rota no para al resto."""
+    index = index or PlaylistIndex(sp, user_id)
+    outcomes: list[JobOutcome] = []
+    for name, raw in history.list_recipes(conn, user_id):
+        try:
+            outcomes.append(update_recipe(sp, conn, user_id, name, smart.Spec.from_json(raw), tz, index))
+        except (ValueError, TypeError) as exc:
+            outcomes.append(JobOutcome(name, None, f"Receta no válida: {exc}"))
+    return outcomes
+
+
 def update_auto_playlists(
     sp: spotipy.Spotify,
     conn: "Database | None",
     user_id: str,
     api_only: bool = False,
+    index: "PlaylistIndex | None" = None,
 ) -> list[JobOutcome]:
     """Registra las escuchas recientes y actualiza las playlists automáticas.
 
@@ -127,7 +169,7 @@ def update_auto_playlists(
     (últimas reproducciones, ≈4 semanas y ≈6 meses). Las de 7 días y último año NO se tocan:
     dependen del registro propio y las pisaría con datos incompletos.
     """
-    index = PlaylistIndex(sp, user_id)  # se descarga una sola vez para las 5 playlists
+    index = index or PlaylistIndex(sp, user_id)  # se descarga una sola vez para todas
     if api_only:
         ctx = _Ctx(sp, None, user_id, index)
         return [_update_recent(ctx), *_update_spotify_rankings(ctx)]

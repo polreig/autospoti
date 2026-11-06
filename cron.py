@@ -20,8 +20,8 @@ import sys
 import history
 import jobs
 import tokens
-from config import ConfigError, use_db_tokens
-from spotify_core import AuthRequiredError, friendly_error, get_spotify_client
+from config import ConfigError, get_timezone, use_db_tokens
+from spotify_core import AuthRequiredError, PlaylistIndex, friendly_error, get_spotify_client
 
 
 def _print_outcomes(outcomes: list[jobs.JobOutcome], prefix: str = "") -> int:
@@ -42,7 +42,10 @@ def _run_user(sp, conn, user_id: str, record_only: bool, prefix: str = "") -> in
         new, dup = jobs.record_recent_plays(sp, conn, user_id)
         print(f"{prefix}Registro: {new} nuevas, {dup} ya existentes.")
         return 0
-    return _print_outcomes(jobs.update_auto_playlists(sp, conn, user_id), prefix)
+    index = PlaylistIndex(sp, user_id)  # compartido por las automáticas y las recetas
+    outcomes = jobs.update_auto_playlists(sp, conn, user_id, index=index)
+    outcomes += jobs.update_recipes(sp, conn, user_id, get_timezone(), index=index)
+    return _print_outcomes(outcomes, prefix)
 
 
 def _run_api_only() -> int:
@@ -82,9 +85,10 @@ def _run_cloud(conn, record_only: bool) -> int:
         return 1
     accounts = tokens.list_accounts(conn)
     if not accounts:
-        print("ERROR: no hay ninguna cuenta de Spotify en la base de datos. "
-              "Define el secret SPOTIFY_CACHE (contenido de tu .cache) para la primera ejecución.")
-        return 1
+        # Normal hasta el primer login en la web: no es un fallo (no llenar el correo de avisos).
+        print("Todavía no hay cuentas: entra una vez en la web con Spotify (o define el secret "
+              "SPOTIFY_CACHE) y el registro empezará solo.")
+        return 0
     errors = failures = 0
     for user_id in accounts:
         prefix = f"[{user_id}] " if len(accounts) > 1 else ""
