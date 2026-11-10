@@ -4,7 +4,7 @@
 > Léelo antes de cualquier cambio y aplícalo siempre, aunque no te lo recuerde.
 > Es **idéntico en todos los repositorios**. Si lo mejoras en uno, avisa para copiarlo a los demás y sube la versión.
 >
-> Versión 1 · 2026-11-10
+> Versión 2 · 2026-11-10 (los cambios respecto a la anterior están al final)
 
 ## 1. Cómo uso mis proyectos
 
@@ -14,7 +14,18 @@
 - **Uso:** desde una ventana, una web o un acceso directo. La consola es solo para desarrollar.
 - **Idioma:** español en la interfaz, los mensajes, el README, los comentarios, los nombres en el código y los commits.
 
-## 2. Estructura de cada repositorio
+## 2. Organización
+
+### Dónde viven los proyectos
+
+- **Una carpeta para todos los proyectos** y, dentro, **un repo por carpeta, en un solo nivel**: `C:\Users\<tu usuario>\Proyectos\<repo>`.
+  - No en Descargas: es lo que ordena el organizador.
+  - No en Documentos: el organizador la analiza para sugerir carpetas.
+  - Nunca una carpeta dentro de otra igual, como pasa al descomprimir un ZIP en una carpeta con el mismo nombre.
+- **La carpeta se llama igual que el repo en GitHub**, en **minúsculas y con guiones**: `organizador-archivos`, no `OrganizadorArchivos` ni `organizador-archivos-main`.
+- **Los datos personales de entrada** (exportaciones, copias…) van en la carpeta de datos del proyecto, nunca sueltos al lado del repo.
+
+### Estructura de cada repositorio
 
 Todos los proyectos tienen esta forma (adapta solo lo que no aplique, y explica por qué en `AGENTS.md`):
 
@@ -25,26 +36,33 @@ mi-proyecto/
   AGENTS.md               lo propio de este proyecto (plantilla del punto 8)
   ESTANDAR_PROYECTOS.md   este archivo, idéntico en todos los repos
   CLAUDE.md               solo dos líneas:  @ESTANDAR_PROYECTOS.md  y  @AGENTS.md
-  Instalar.bat            doble clic para instalar (llama a install.ps1)
-  Desinstalar.bat         quita lo instalado (llama a uninstall.ps1)
-  install.ps1 / uninstall.ps1
+  Instalar.bat            doble clic para instalar (llama a scripts\install.ps1)
+  Desinstalar.bat         quita lo instalado (llama a scripts\uninstall.ps1)
+  <App>.bat               opcional: abrir la app sin acceso directo
   config.example.*        configuración de ejemplo, comentada (la real está en .gitignore)
   requirements.txt        dependencias (si las hay)
-  <paquete>/              el código
-  tests/                  pruebas
+  <paquete>/              el código (un paquete con el nombre del proyecto)
+  scripts/                install.ps1, uninstall.ps1 y herramientas de desarrollo
+  tests/                  solo pruebas
   docs/capturas/          imágenes del README
+  datos/                  lo que genera la app (en .gitignore, nunca se sube)
   .gitignore              config real, datos/, .env, cachés, entornos virtuales
   .gitattributes          *.bat y *.ps1 con saltos de línea CRLF
 ```
 
-- Los datos que genera la app (historial, cachés, logs) van en `datos/` (o `data/`) y nunca se suben.
-- La lógica va separada de la interfaz: una capa de servicio que usan igual la ventana y la línea de comandos.
+- **La raíz es para el usuario:** solo lo que se lee (`.md`), lo que se pulsa (`.bat`) y la configuración de ejemplo. Todo lo demás va en una carpeta.
+- **Código:** dentro de **un paquete** (`<paquete>/`), no como archivos `.py` sueltos en la raíz. Los puntos de entrada se ejecutan como módulo: `python -m <paquete>` o `python -m <paquete>.<comando>`. Solo se queda fuera lo que una plataforma exige en un sitio fijo (por ejemplo `api/index.py` en Vercel).
+- **`scripts/`:** instaladores `.ps1` y herramientas de desarrollo (comprobaciones, buscar secretos…). **`tests/` es solo para pruebas.**
+- **Datos:** la carpeta de datos se llama `datos/`. Los proyectos antiguos que usen otro nombre lo indican en `AGENTS.md`.
+- **Pruebas:** cuando un archivo de pruebas pase de unas 500 líneas, divídelo por áreas (`test_reglas.py`, `test_interfaz.py`…).
+- **Nada de archivos de reglas de una herramienta concreta** (`.clinerules`, `.cursorrules`…): todo va en `AGENTS.md`, que leen todas.
+- **La lógica va separada de la interfaz:** una capa de servicio que usan igual la ventana y la línea de comandos.
 
 ## 3. Instalación: lo que tiene que hacer la app
 
 ### Apps locales (se ejecutan en mi portátil)
-- **`Instalar.bat`** (doble clic) llama a `powershell -ExecutionPolicy Bypass -File install.ps1` y termina con `pause`.
-- **`install.ps1`**, por pasos numerados (`[1/4]`, `[2/4]`…):
+- **`Instalar.bat`** (doble clic) llama a `powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\install.ps1"` y termina con `pause`.
+- **`scripts\install.ps1`** trabaja sobre la carpeta del proyecto (`Split-Path $PSScriptRoot -Parent`) y avanza por pasos numerados (`[1/4]`, `[2/4]`…):
   1. Comprueba los requisitos (Python, versión…). Si falta algo, dice qué instalar, con enlace, y para.
   2. Instala las dependencias.
   3. Crea la configuración copiando el ejemplo, **sin sobrescribir nunca la que ya exista**.
@@ -135,8 +153,19 @@ Sigue ESTANDAR_PROYECTOS.md (obligatorio). Aquí solo va lo propio de este proye
 
 ## 9. Proyecto nuevo
 
-1. Crea la estructura del punto 2 y copia este archivo tal cual.
+1. Crea el repo en `C:\Users\<tu usuario>\Proyectos\<nombre-con-guiones>` con la estructura del punto 2 y copia este archivo tal cual.
 2. Escribe `AGENTS.md` con la plantilla del punto 8 y `CLAUDE.md` con sus dos líneas.
 3. Escribe el README con la plantilla del punto 4 desde el primer día, aunque esté corto.
 4. Configura la identidad de git del punto 5 en el repo antes del primer commit.
 5. Empieza `CHANGELOG.md` con la versión `0.1.0`.
+
+## 10. Cambios del estándar
+
+- **v2 (2026-11-10):**
+  - Dónde viven los proyectos y cómo se llaman (un nivel, minúsculas y guiones).
+  - La raíz, solo para el usuario; los `.ps1` y las herramientas, en `scripts/`; `tests/` solo para pruebas.
+  - El código, siempre dentro de un paquete.
+  - La carpeta de datos se llama `datos/`.
+  - Dividir las pruebas cuando crecen.
+  - Sin archivos de reglas de una herramienta concreta.
+- **v1 (2026-11-10):** primera versión.
