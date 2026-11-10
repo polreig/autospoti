@@ -1,5 +1,7 @@
 # autospoti
 
+Sigue [ESTANDAR_PROYECTOS.md](ESTANDAR_PROYECTOS.md) (obligatorio). Aquí solo va lo propio de este proyecto.
+
 App en Python para crear playlists de Spotify: web FastAPI (Vercel) + spotipy + Postgres/SQLite; app Streamlit solo para uso local.
 
 ## Comandos
@@ -32,3 +34,16 @@ App en Python para crear playlists de Spotify: web FastAPI (Vercel) + spotipy + 
 - Todo instante se guarda en UTC (segundos Unix); la zona (`APP_TIMEZONE`) solo se aplica al interpretar fechas.
 - Toda consulta o escritura del historial lleva `user_id` (preparado para varios usuarios). Las playlists se escriben con `jobs.write_playlist` (recuerda su ID en `managed_playlists`) y compartiendo un `PlaylistIndex` por ejecución.
 - Añadir un test en `tests/` por cada cambio de lógica. Respuestas y textos de la interfaz en español.
+
+## Pendiente para cumplir el estándar
+
+Es una app web en la nube: aplica la parte "Apps web o en la nube" del punto 3 del estándar.
+
+- **README:** reorganizarlo con la plantilla del estándar (punto 4).
+  - "Antes de empezar": cuentas de Spotify Developer, Neon, GitHub y Vercel.
+  - Cada servicio en su propio paso, con los botones exactos.
+  - **Tabla de variables y secretos**: nombre, para qué sirve, de dónde sale y dónde se pone (GitHub Secrets o Vercel).
+  - Comprobación final, "Actualizar", "Problemas frecuentes" (incluido el aviso de los 60 días de GitHub Actions) y capturas en `docs/capturas/`.
+- **`CHANGELOG.md`:** crearlo, empezando por la versión actual.
+- **Uso local:** un `Instalar.bat` que instale `requirements-local.txt` y cree un acceso directo a `Abrir Autospoti.bat`.
+- **`.gitattributes`:** `*.bat` y `*.ps1` con saltos de línea CRLF.
