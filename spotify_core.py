@@ -163,6 +163,10 @@ class PlaylistIndex:
                 return playlist_id
         return None
 
+    def names(self) -> list[str]:
+        """Nombres de todas tus playlists."""
+        return list(self._load().values())
+
     def remember(self, playlist_id: str, name: str) -> None:
         self._load()[playlist_id] = name
 

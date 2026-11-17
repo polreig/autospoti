@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-from datetime import tzinfo
+from datetime import datetime, timezone, tzinfo
 
 import spotipy
 
 import history
+import monthly
 import smart
 from db import Database
 from config import get_min_play_ms
@@ -22,11 +22,25 @@ from spotify_core import (
 )
 
 # Nombres de las playlists automáticas (al crearlas; después se reconocen por su ID guardado).
+# NO cambiarlos: el ID guardado va por nombre y se crearía una playlist nueva.
 NAME_RECENT = "Últimas reproducciones"
 NAME_7D = "Más escuchado (7 días)"
 NAME_4W = "Más escuchado (≈4 semanas)"
 NAME_6M = "Más escuchado (≈6 meses)"
 NAME_YEAR = "Más escuchado (último año)"
+NAME_ALWAYS = "Always"
+
+# Canciones de cada automática. Últimas reproducciones: la API da como mucho 50.
+LIMIT_7D = 50
+LIMIT_4W = 100
+LIMIT_6M = 100
+LIMIT_YEAR = 100
+LIMIT_ALWAYS = 250
+
+# Días de cada periodo cuando se calcula con el registro propio.
+DAYS_4W = 28
+DAYS_6M = 182
+DAYS_YEAR = 365
 
 
 @dataclass
@@ -108,13 +122,28 @@ def _update_recent(ctx: _Ctx) -> JobOutcome:
 
 
 def _update_spotify_rankings(ctx: _Ctx) -> list[JobOutcome]:
-    """Rankings de Spotify (no existe un top exacto de 30/180 días en la API)."""
+    """Rankings de Spotify (modo sin BD: no existe un top exacto de 4 semanas/6 meses en la API)."""
     return [
-        _from_spotify_top(ctx, NAME_4W, "short_term", 50,
+        _from_spotify_top(ctx, NAME_4W, "short_term", LIMIT_4W,
                           "Mi top de canciones de las últimas ~4 semanas (Spotify)."),
-        _from_spotify_top(ctx, NAME_6M, "medium_term", 100,
+        _from_spotify_top(ctx, NAME_6M, "medium_term", LIMIT_6M,
                           "Mi top de canciones de los últimos ~6 meses (Spotify)."),
     ]
+
+
+def _ranked(ctx: _Ctx, name: str, days: int, limit: int, label: str, time_range: str) -> JobOutcome:
+    """Top de los últimos ``days`` días con el registro propio, exacto, si el registro CUBRE el
+    periodo (hay escuchas desde antes de su inicio) y hay escuchas dentro. Si no, el ranking
+    aproximado de Spotify (``time_range``)."""
+    start, end = range_last_days(days)
+    cov = history.coverage(ctx.conn, ctx.user_id)
+    covers = cov.first_ts is not None and cov.first_ts <= start
+    if covers and history.count_plays(ctx.conn, ctx.user_id, start, end) > 0:
+        return _from_history(ctx, name, start, end,
+                             f"Mis {limit} canciones más escuchadas {label} (registro propio, "
+                             "se actualiza cada día).", limit)
+    return _from_spotify_top(ctx, name, time_range, limit,
+                             f"Mi top de canciones {label} (ranking de Spotify).")
 
 
 def update_recipe(
@@ -164,10 +193,13 @@ def update_auto_playlists(
 ) -> list[JobOutcome]:
     """Registra las escuchas recientes y actualiza las playlists automáticas.
 
-    Con ``api_only=True`` (GitHub Actions, Streamlit Cloud: sin disco persistente) no se usa
-    la base de datos y solo se actualizan las playlists que salen de la API de Spotify
-    (últimas reproducciones, ≈4 semanas y ≈6 meses). Las de 7 días y último año NO se tocan:
-    dependen del registro propio y las pisaría con datos incompletos.
+    Con BD (6 playlists): últimas reproducciones (50), 7 días (50), 4 semanas (100),
+    6 meses (100), último año (100) y Always (250, de siempre). Las de 4 semanas, 6 meses y
+    año salen del registro propio si cubre el periodo; si no, del ranking de Spotify.
+
+    Con ``api_only=True`` (sin base de datos) solo se actualizan las que salen de la API de
+    Spotify (últimas reproducciones, ≈4 semanas y ≈6 meses). Las de 7 días, último año y
+    Always NO se tocan: dependen del registro propio y las pisaría con datos incompletos.
     """
     index = index or PlaylistIndex(sp, user_id)  # se descarga una sola vez para todas
     if api_only:
@@ -176,34 +208,78 @@ def update_auto_playlists(
     if conn is None:
         raise ValueError("Se necesita la base de datos del historial (o usa api_only=True).")
     ctx = _Ctx(sp, conn, user_id, index)
-    record_recent_plays(sp, conn, user_id)
+    record_recent_plays(sp, conn, user_id)  # antes de calcular: incluye lo último escuchado
     outcomes: list[JobOutcome] = [_update_recent(ctx)]
 
-    # Más escuchado 7 días: se calcula con el registro propio.
+    # 7 días: siempre con el registro propio (Spotify no tiene un ranking semanal).
     start, end = range_last_days(7)
     outcome = _from_history(
         ctx, NAME_7D, start, end,
-        "Canciones que más he reproducido en los últimos 7 días (registro propio).",
+        f"Mis {LIMIT_7D} canciones más escuchadas en los últimos 7 días (registro propio, "
+        "se actualiza cada día).", LIMIT_7D,
     )
     if not outcome.ok:
         cov = history.coverage(conn, user_id)
-        outcome.note += f" (reproducciones registradas en total: {cov.total})"
+        outcome.note += (f" (reproducciones registradas en total: {cov.total}; revisa que el "
+                         "registro de cada hora esté funcionando)")
     outcomes.append(outcome)
 
-    outcomes.extend(_update_spotify_rankings(ctx))
+    outcomes.append(_ranked(ctx, NAME_4W, DAYS_4W, LIMIT_4W, "de las últimas 4 semanas", "short_term"))
+    outcomes.append(_ranked(ctx, NAME_6M, DAYS_6M, LIMIT_6M, "de los últimos 6 meses", "medium_term"))
+    outcomes.append(_ranked(ctx, NAME_YEAR, DAYS_YEAR, LIMIT_YEAR, "del último año", "long_term"))
 
-    # Último año: exacto solo si el registro CUBRE el año (hay datos desde antes de hace
-    # 365 días) y además hay reproducciones dentro de ese año. Si no, ranking de Spotify.
-    year_start, year_end = range_last_days(365)
+    # Always: lo más escuchado de siempre (todo el registro + historial importado).
     cov = history.coverage(conn, user_id)
-    covers_year = cov.first_ts is not None and cov.first_ts <= year_start
-    if covers_year and history.count_plays(conn, user_id, year_start, year_end) > 0:
-        outcomes.append(_from_history(
-            ctx, NAME_YEAR, year_start, year_end,
-            "Canciones que más he reproducido en el último año (registro propio + historial exportado).",
-        ))
+    if cov.first_ts is None:
+        outcomes.append(JobOutcome(NAME_ALWAYS, None, "Aún no hay escuchas registradas."))
     else:
-        outcomes.append(_from_spotify_top(
-            ctx, NAME_YEAR, "long_term", 100,
-            "Mi top de canciones del último año (Spotify)."))
+        outcomes.append(_from_history(
+            ctx, NAME_ALWAYS, cov.first_ts, cov.last_ts + 1,
+            f"Mis {LIMIT_ALWAYS} canciones más escuchadas de siempre (registro propio + historial "
+            "importado, se actualiza cada día).", LIMIT_ALWAYS,
+        ))
+    return outcomes
+
+
+# ---------------------------------------------------------------- playlists mensuales
+
+def monthly_plan(sp: spotipy.Spotify, conn: Database, user_id: str, tz: tzinfo,
+                 index: "PlaylistIndex | None" = None, now=None) -> list["monthly.MonthPlan"]:
+    """Vista previa: qué meses tienen ya playlist y cuáles se crearían (no escribe nada)."""
+    if history.coverage(conn, user_id).first_ts is None:
+        return []  # sin escuchas no hay meses (y no hace falta descargar tus playlists)
+    index = index or PlaylistIndex(sp, user_id)
+    return monthly.plan(conn, user_id, tz, index.names(), now=now, min_ms=get_min_play_ms())
+
+
+def create_monthly_playlists(
+    sp: spotipy.Spotify,
+    conn: Database,
+    user_id: str,
+    tz: tzinfo,
+    index: "PlaylistIndex | None" = None,
+    *,
+    only_previous_month: bool = False,
+    max_count: "int | None" = None,
+    now=None,
+) -> list[JobOutcome]:
+    """Crea las playlists mensuales que faltan, de la más antigua a la más reciente.
+
+    ``only_previous_month``: solo la del mes pasado (lo que hace la tarea diaria: el día 1
+    aparece la del mes que acaba de terminar). Nunca toca una playlist mensual que ya exista.
+    ``max_count``: cuántas como mucho en esta llamada (la web va por tandas).
+    """
+    index = index or PlaylistIndex(sp, user_id)
+    now = now or datetime.now(timezone.utc)
+    plans = [p for p in monthly_plan(sp, conn, user_id, tz, index, now) if p.status == monthly.TO_CREATE]
+    if only_previous_month:
+        last = monthly.previous_month(now, tz)
+        plans = [p for p in plans if p.key == last]
+    if max_count is not None:
+        plans = plans[:max_count]
+    outcomes = []
+    for p in plans:
+        result = write_playlist(sp, conn, user_id, p.name, [t.uri for t in p.tracks],
+                                monthly.description(p.year, p.month), index)
+        outcomes.append(JobOutcome(p.name, result))
     return outcomes

@@ -208,20 +208,43 @@ def top_tracks(
     limit: int,
     min_ms: int = 0,
 ) -> list[TopTrack]:
-    """Canciones más reproducidas en [start_ts, end_ts). Desempata por la más reciente."""
+    """Canciones más reproducidas en [start_ts, end_ts). Desempata por la más reciente.
+
+    Las versiones de una misma canción (single y álbum, remasterizada...) tienen URIs
+    distintas pero el mismo título y artista: se suman como una sola y se usa la URI de la
+    versión más escuchada. Así una canción no sale dos veces en la playlist.
+    """
     cur = conn.execute(
         """
-        SELECT track_uri, MAX(track_name), MAX(artist), COUNT(*)
+        SELECT track_uri, MAX(track_name), MAX(artist), COUNT(*), MAX(ts)
         FROM plays
         WHERE user_id = ? AND ts >= ? AND ts < ? AND (ms_played IS NULL OR ms_played >= ?)
         GROUP BY track_uri
-        ORDER BY COUNT(*) DESC, MAX(ts) DESC
-        LIMIT ?
         """,
-        (user_id, start_ts, end_ts, min_ms, limit),
+        (user_id, start_ts, end_ts, min_ms),
     )
-    return [TopTrack(uri=r[0], name=r[1] or "(sin título)", artist=r[2] or "", plays=r[3])
-            for r in cur.fetchall()]
+    # song_key -> [uri, nombre, artista, escuchas totales, última escucha, escuchas de esa URI]
+    songs: dict = {}
+    for uri, name, artist, plays, last_ts in cur.fetchall():
+        key = song_key(uri, name, artist)
+        song = songs.get(key)
+        if song is None:
+            songs[key] = [uri, name, artist, plays, last_ts, plays]
+            continue
+        if (plays, last_ts) > (song[5], song[4]):  # la versión más escuchada da la URI
+            song[0], song[1], song[2], song[5] = uri, name or song[1], artist or song[2], plays
+        song[3] += plays
+        song[4] = max(song[4], last_ts)
+    ranked = sorted(songs.values(), key=lambda s: (-s[3], -s[4], s[0]))[:limit]
+    return [TopTrack(uri=s[0], name=s[1] or "(sin título)", artist=s[2] or "", plays=s[3])
+            for s in ranked]
+
+
+def song_key(uri: str, name: "str | None", artist: "str | None") -> tuple:
+    """Identifica una canción aunque tenga varias URIs (mismo título y artista)."""
+    if not name or not artist:
+        return ("uri", uri)
+    return (" ".join(name.casefold().split()), " ".join(artist.casefold().split()))
 
 
 class PlayEvent(NamedTuple):
@@ -278,6 +301,12 @@ def get_playlist_id(conn: Database, user_id: str, name: str) -> "str | None":
         "SELECT playlist_id FROM managed_playlists WHERE user_id = ? AND name = ?", (user_id, name)
     ).fetchone()
     return row[0] if row else None
+
+
+def managed_names(conn: Database, user_id: str) -> set[str]:
+    """Nombres de todas las playlists que autospoti ha creado alguna vez para ``user_id``."""
+    cur = conn.execute("SELECT name FROM managed_playlists WHERE user_id = ?", (user_id,))
+    return {row[0] for row in cur.fetchall()}
 
 
 def save_playlist_id(conn: Database, user_id: str, name: str, playlist_id: str) -> None:

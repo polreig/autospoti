@@ -27,11 +27,13 @@
     <h2>Playlists automáticas</h2>
     <ul class="list">
       <li><strong>Últimas reproducciones</strong> · tus últimas 50 escuchas</li>
-      <li><strong>Más escuchado (7 días)</strong> · con tu registro propio</li>
-      <li><strong>≈4 semanas y ≈6 meses</strong> · rankings de Spotify</li>
-      <li><strong>Último año</strong> · exacto si tu historial cubre 365 días</li>
+      <li><strong>Más escuchado (7 días)</strong> · top 50</li>
+      <li><strong>4 semanas, 6 meses y último año</strong> · top 100 de cada periodo</li>
+      <li><strong>Always</strong> · tus 250 canciones más escuchadas de siempre</li>
+      <li><strong><a href="/monthly">Mensuales</a></strong> · el día 1, el top 100 del mes que termina</li>
     </ul>
-    <p class="muted small">Se actualizan solas cada día. Última escucha registrada: {{ last }}.</p>
+    <p class="muted small">Se actualizan solas cada día con tu registro propio (si aún no cubre el periodo,
+      con el ranking de Spotify). Última escucha registrada: {{ last }}.</p>
     <form method="post" action="/auto" data-busy="Actualizando…">
       <button class="btn btn-primary"><span class="ms" aria-hidden="true">autorenew</span>Actualizar ahora</button>
     </form>

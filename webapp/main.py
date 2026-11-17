@@ -28,6 +28,7 @@ import blend
 import charts
 import history
 import jobs
+import monthly
 import smart
 import stats
 import tokens
@@ -41,13 +42,15 @@ from webapp import forms
 BASE = Path(__file__).resolve().parent
 SESSION_MAX_AGE = 30 * 24 * 3600
 IMPORT_BATCH_MAX = 5000          # entradas por petición (Vercel limita el cuerpo a 4,5 MB)
+MONTHLY_BATCH = 10               # playlists mensuales por petición (Vercel corta a los 60 s)
 STATS_CACHE_TTL = 600
 MIN_YEAR = 2008
 
 NAV = [
     ("Tu música", [("/", "Inicio", "home"), ("/stats", "Estadísticas", "insights")]),
     ("Crear playlists", [("/custom", "Personalizada", "tune"), ("/rediscover", "Redescubrimientos", "history"),
-                         ("/blend", "En pareja", "favorite"), ("/recipes", "Mis recetas", "auto_awesome"),
+                         ("/monthly", "Mensuales", "calendar_month"), ("/blend", "En pareja", "favorite"),
+                         ("/recipes", "Mis recetas", "auto_awesome"),
                          ("/top", "Top de Spotify", "trophy")]),
     ("Ajustes", [("/import", "Importar historial", "upload_file"), ("/account", "Tu cuenta", "account_circle")]),
 ]
@@ -280,6 +283,44 @@ def create_app() -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             flash(request, "error", friendly_error(exc))
         return RedirectResponse("/", 303)
+
+    # -------------------------------------------------------------- mensuales
+
+    @app.get("/monthly", response_class=HTMLResponse)
+    def monthly_page(request: Request):
+        uid = current_user(request)
+        db = get_db()
+        plans, error = [], ""
+        try:
+            plans = jobs.monthly_plan(spotify_for(db, uid), db, uid, get_timezone())
+        except Exception as exc:  # noqa: BLE001
+            error = friendly_error(exc)
+        missing = [p for p in plans if p.status == monthly.TO_CREATE]
+        return render(request, "monthly.html", active="/monthly", plans=list(reversed(plans)),
+                      missing=len(missing), error=error, batch=MONTHLY_BATCH,
+                      limit=monthly.MONTHLY_LIMIT, min_tracks=monthly.MONTHLY_MIN_TRACKS,
+                      example=monthly.monthly_name(2025, 9))
+
+    @app.post("/monthly/create")
+    def monthly_create(request: Request):
+        uid = current_user(request)
+        db = get_db()
+        try:
+            outcomes = jobs.create_monthly_playlists(spotify_for(db, uid), db, uid, get_timezone(),
+                                                     max_count=MONTHLY_BATCH)
+        except Exception as exc:  # noqa: BLE001
+            flash(request, "error", friendly_error(exc))
+            return RedirectResponse("/monthly", 303)
+        created = sum(o.ok for o in outcomes)
+        if not outcomes:
+            flash(request, "ok", "No falta ninguna playlist mensual.")
+        else:
+            flash(request, "ok", f"Creadas {created} playlists mensuales: "
+                                 + ", ".join(o.name for o in outcomes if o.ok) + ".")
+        for outcome in outcomes:
+            if not outcome.ok:
+                flash_outcome(request, outcome)
+        return RedirectResponse("/monthly", 303)
 
     # -------------------------------------------------------------- estadísticas
 

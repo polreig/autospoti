@@ -2,7 +2,9 @@ name: Actualizar playlists automáticas
 
 # Con el secret DATABASE_URL (Postgres en la nube):
 #   * cada hora      -> python cron.py --record   (registra tus escuchas; nunca se pierden)
-#   * cada día 04:00 -> python cron.py            (registra + actualiza las 5 playlists)
+#   * cada día 04:00 -> python cron.py            (registra + actualiza las 6 automáticas, las
+#                                                  recetas y crea la mensual del mes pasado)
+#   * a mano, modo "meses" -> python cron.py --meses  (crea TODAS las mensuales que faltan)
 # Sin DATABASE_URL (modo antiguo): solo la ejecución diaria con --api-only (3 playlists).
 
 on:
@@ -14,7 +16,7 @@ on:
       mode:
         description: "Qué ejecutar"
         type: choice
-        options: [completo, registro]
+        options: [completo, registro, meses]
         default: completo
 
 permissions:
@@ -27,7 +29,7 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30   # el modo "meses" puede crear muchas playlists la primera vez
     steps:
       - name: Decidir qué ejecutar
         id: plan
@@ -39,7 +41,12 @@ jobs:
           hourly=false
           if [ "$SCHEDULE" = "17 * * * *" ] || [ "$MODE" = "registro" ]; then hourly=true; fi
           if [ "$HAS_DB" = true ]; then
-            if [ "$hourly" = true ]; then args="--record"; else args=""; fi
+            if [ "$hourly" = true ]; then args="--record"
+            elif [ "$MODE" = "meses" ]; then args="--meses"
+            else args=""; fi
+          elif [ "$MODE" = "meses" ]; then
+            echo "Las playlists mensuales necesitan el secret DATABASE_URL (tu historial)."
+            args="skip"
           elif [ "$hourly" = true ]; then
             echo "Sin el secret DATABASE_URL no hay registro horario (no hay dónde guardarlo)."
             args="skip"

@@ -18,12 +18,20 @@ except ImportError:  # pragma: no cover
 
 import blend  # noqa: E402
 import history  # noqa: E402
+import monthly  # noqa: E402
 import smart  # noqa: E402
 import tokens  # noqa: E402
 import web_auth  # noqa: E402
 from _db import fresh_db  # noqa: E402
 from spotify_core import PlaylistResult  # noqa: E402
 from webapp import forms  # noqa: E402
+
+class FakeSp:
+    """Spotify sin playlists (para PlaylistIndex)."""
+
+    def current_user_playlists(self, limit=50):
+        return {"items": [], "next": None}
+
 
 TOKEN = {"access_token": "a", "refresh_token": "r", "expires_at": 9999999999}
 
@@ -135,10 +143,43 @@ class WebAppTests(unittest.TestCase):
                  "/custom", "/custom?period=mes&month=2&year=2025", "/custom?period=todo&d=6&f=noche&avoid=1",
                  "/custom?period=fechas&start=2025-01-01&end=2025-03-01", "/rediscover",
                  "/rediscover?epoch=anio&year=2024&forgotten=12", "/blend", "/recipes", "/top", "/import",
-                 "/account", "/static/app.css", "/static/app.js"]
-        for path in pages:
-            r = client.get(path)
-            self.assertEqual(r.status_code, 200, path)
+                 "/account", "/monthly", "/static/app.css", "/static/app.js"]
+        with mock.patch.object(self.main, "spotify_for", return_value=FakeSp()):
+            for path in pages:
+                r = client.get(path)
+                self.assertEqual(r.status_code, 200, path)
+
+    # -------------------------------------------------------------- mensuales
+
+    def test_monthly_preview_and_create_in_batches(self):
+        client = self.client()
+        sp = FakeSp()
+        # Los datos de prueba tienen 6 canciones por mes: se baja el mínimo para que se creen.
+        patcher = mock.patch.object(monthly, "MONTHLY_MIN_TRACKS", 1)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        with mock.patch.object(self.main, "spotify_for", return_value=sp):
+            page = client.get("/monthly").text
+        self.assertIn("Se creará", page)
+        self.assertNotIn("Ya la tienes", page)
+        written = []
+
+        def fake_create(sp_, user_id, name, uris, description="", **kwargs):
+            written.append(name)
+            return PlaylistResult(f"id-{name}", True, len(uris), "u")
+
+        with mock.patch.object(self.main, "spotify_for", return_value=sp),                 mock.patch("jobs.create_or_update_playlist", side_effect=fake_create):
+            r = client.post("/monthly/create")
+        self.assertIn("Creadas", r.text)
+        self.assertLessEqual(len(written), self.main.MONTHLY_BATCH)
+        self.assertTrue(all(name.endswith("'") for name in written))
+        self.assertEqual(history.managed_names(self.db, "pol"), set(written))
+
+    def test_monthly_spotify_error_is_shown(self):
+        with mock.patch.object(self.main, "spotify_for", side_effect=RuntimeError("sin red")):
+            r = self.client().get("/monthly")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("No se pudo leer tu lista", r.text)
 
     def test_stats_embeds_three_charts(self):
         r = self.client().get("/stats?period=todo")

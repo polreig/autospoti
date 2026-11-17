@@ -204,12 +204,13 @@ def page_home(ctx: Ctx) -> None:
         else:
             st.write(
                 "- **Últimas reproducciones**: tus últimas 50 escuchas (no es un ranking).\n"
-                "- **Más escuchado (7 días)**: con tu registro propio.\n"
-                "- **≈4 semanas y ≈6 meses**: rankings de Spotify (la API no ofrece 30/180 días exactos).\n"
-                "- **Último año**: exacto si tu historial cubre 365 días; si no, el ranking de Spotify."
+                "- **Más escuchado (7 días)**: top 50 con tu registro propio.\n"
+                "- **4 semanas, 6 meses y último año**: top 100, exacto si tu registro cubre el "
+                "periodo; si no, el ranking de Spotify.\n"
+                "- **Always**: tus 250 canciones más escuchadas de siempre."
             )
         st.caption("Se actualizan solas cada día; aquí puedes forzarlo ahora.")
-        label = "Actualizar las 3 playlists" if api_only else "Actualizar las 5 playlists"
+        label = "Actualizar las 3 playlists" if api_only else "Actualizar las 6 playlists"
         if st.button(label, type="primary", icon=":material/autorenew:"):
             try:
                 with st.spinner("Procesando canciones..."):

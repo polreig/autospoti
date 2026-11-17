@@ -7,7 +7,8 @@ Web para crear y mantener playlists de Spotify a partir de un registro propio de
 * **Redescubrimientos**: canciones que escuchaste mucho y llevas meses sin poner.
 * **En pareja**: mezclas con otra cuenta enlazada (lo que escuchais los dos, o mitad y mitad). Requiere que las dos personas acepten.
 * **Mis recetas**: cualquier playlist anterior puede guardarse para que se recalcule sola cada dia.
-* **Automaticas**: ultimas reproducciones, 7 dias, ~4 semanas, ~6 meses y ultimo ano.
+* **Automaticas** (cada dia): ultimas reproducciones (50 canciones), mas escuchado en 7 dias (50), 4 semanas (100), 6 meses (100), ultimo ano (100) y **Always**, tus 250 canciones mas escuchadas de siempre.
+* **Mensuales**: el dia 1 de cada mes se crea sola la playlist del mes que acaba de terminar con tus 100 canciones mas escuchadas, con nombres como *September 25'*. Las de meses anteriores que te falten se crean desde **Mensuales** en la web (ver abajo).
 
 ## Como funciona en la nube (todo gratis)
 
@@ -48,6 +49,18 @@ Tu ID de Spotify aparece en **Tu cuenta** despues de entrar (o en spotify.com > 
 1. Dashboard de Spotify > tu app > **User Management**: anade su nombre y el email de su cuenta de Spotify (Development Mode admite pocas cuentas; para dos sobra).
 2. Anade su ID a `ALLOWED_SPOTIFY_IDS` en Vercel y vuelve a desplegar (*Redeploy*).
 3. Que entre en la web con su cuenta. Desde **En pareja**, uno invita al otro por su ID y el otro acepta.
+
+## Playlists mensuales de meses anteriores
+
+Hazlo una vez, despues de importar tu historial:
+
+1. Abre la web y entra en **Mensuales** (menu de la izquierda, en *Crear playlists*).
+2. Revisa la tabla: cada mes de tu historial sale como **Ya la tienes**, **Se creara** o **Muy pocas escuchas**. Se reconocen tambien tus playlists con nombres parecidos (*Sept 25*, *September 2025*, *Septiembre 25'*), asi que no se duplican.
+3. Pulsa **Crear las ... que faltan** y acepta el aviso. Se crean por tandas de 10: si faltan mas, pulsa otra vez hasta que ponga **No falta ninguna**.
+
+Alternativa sin la web: en GitHub, **Actions > Actualizar playlists automaticas > Run workflow**, elige el modo `meses` y pulsa **Run workflow**. Crea todas las que falten de una vez.
+
+Las playlists nuevas se crean privadas. Si borras una que creo autospoti, no se vuelve a crear.
 
 ## Uso en tu PC (opcional)
 

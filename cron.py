@@ -1,10 +1,13 @@
 """Tarea programada: registra tus reproducciones y actualiza las playlists automáticas.
 
 Uso:
-    python cron.py             # registra + actualiza las 5 playlists
+    python cron.py             # registra + actualiza las 6 automáticas y las recetas, y crea
+                               # la playlist mensual del mes pasado si aún no existe
     python cron.py --record    # solo registra reproducciones (ejecutar cada hora)
+    python cron.py --meses     # crea TODAS las playlists mensuales que faltan
+    python cron.py --meses --vista-previa   # solo enseña qué meses se crearían
     python cron.py --api-only  # sin base de datos: solo las 3 playlists que salen de la API
-                               # (no toca las de 7 días ni último año).
+                               # (no toca las de 7 días, último año ni Always).
 
 Dónde se guarda todo:
   * Local (sin DATABASE_URL): SQLite ``data/history.db`` y token en ``.cache``.
@@ -19,6 +22,7 @@ import sys
 
 import history
 import jobs
+import monthly
 import tokens
 from config import ConfigError, get_timezone, use_db_tokens
 from spotify_core import AuthRequiredError, PlaylistIndex, friendly_error, get_spotify_client
@@ -36,15 +40,40 @@ def _print_outcomes(outcomes: list[jobs.JobOutcome], prefix: str = "") -> int:
     return failures
 
 
-def _run_user(sp, conn, user_id: str, record_only: bool, prefix: str = "") -> int:
-    """Procesa una cuenta. Devuelve el número de playlists que no se pudieron actualizar."""
-    if record_only:
+def _print_month_plan(plans, prefix: str = "") -> None:
+    labels = {monthly.EXISTS: "ya la tienes", monthly.MANAGED: "ya la creó autospoti",
+              monthly.FEW: "muy pocas escuchas, no se crea", monthly.TO_CREATE: "SE CREARÁ"}
+    for p in plans:
+        extra = f" ({len(p.tracks)} canciones)" if p.status == monthly.TO_CREATE else ""
+        print(f"{prefix}{p.name:<16} {labels[p.status]}{extra}")
+    missing = sum(p.status == monthly.TO_CREATE for p in plans)
+    print(f"{prefix}{len(plans)} meses completos en tu historial; se crearían {missing}.")
+
+
+def _run_user(sp, conn, user_id: str, mode: str, prefix: str = "") -> int:
+    """Procesa una cuenta. Devuelve el número de playlists que no se pudieron actualizar.
+
+    ``mode``: "record" (solo registrar), "full" (diaria), "months" (crear todas las mensuales
+    que faltan) o "months-preview" (solo enseñar cuáles).
+    """
+    if mode == "record":
         new, dup = jobs.record_recent_plays(sp, conn, user_id)
         print(f"{prefix}Registro: {new} nuevas, {dup} ya existentes.")
         return 0
-    index = PlaylistIndex(sp, user_id)  # compartido por las automáticas y las recetas
+    tz = get_timezone()
+    index = PlaylistIndex(sp, user_id)  # compartido por todas las escrituras de la ejecución
+    if mode == "months-preview":
+        _print_month_plan(jobs.monthly_plan(sp, conn, user_id, tz, index), prefix)
+        return 0
+    if mode == "months":
+        jobs.record_recent_plays(sp, conn, user_id)
+        outcomes = jobs.create_monthly_playlists(sp, conn, user_id, tz, index)
+        if not outcomes:
+            print(f"{prefix}No falta ninguna playlist mensual.")
+        return _print_outcomes(outcomes, prefix)
     outcomes = jobs.update_auto_playlists(sp, conn, user_id, index=index)
-    outcomes += jobs.update_recipes(sp, conn, user_id, get_timezone(), index=index)
+    outcomes += jobs.update_recipes(sp, conn, user_id, tz, index=index)
+    outcomes += jobs.create_monthly_playlists(sp, conn, user_id, tz, index, only_previous_month=True)
     return _print_outcomes(outcomes, prefix)
 
 
@@ -60,7 +89,7 @@ def _run_api_only() -> int:
     return 1
 
 
-def _run_local(conn, record_only: bool) -> int:
+def _run_local(conn, mode: str) -> int:
     """Un único usuario con el token de .cache (tu PC)."""
     try:
         sp = get_spotify_client()
@@ -73,10 +102,10 @@ def _run_local(conn, record_only: bool) -> int:
         return 1
     # Historial migrado del esquema antiguo (sin usuario): pasa a ser del dueño.
     history.claim_orphan_plays(conn, user_id)
-    return 0 if _run_user(sp, conn, user_id, record_only) == 0 else 2
+    return 0 if _run_user(sp, conn, user_id, mode) == 0 else 2
 
 
-def _run_cloud(conn, record_only: bool) -> int:
+def _run_cloud(conn, mode: str) -> int:
     """Todas las cuentas con token en la BD. Un fallo en una no detiene a las demás."""
     try:
         tokens.bootstrap_from_env(conn)
@@ -94,7 +123,7 @@ def _run_cloud(conn, record_only: bool) -> int:
         prefix = f"[{user_id}] " if len(accounts) > 1 else ""
         try:
             sp = get_spotify_client(cache_handler=tokens.DbCacheHandler(conn, user_id))
-            failures += _run_user(sp, conn, user_id, record_only, prefix)
+            failures += _run_user(sp, conn, user_id, mode, prefix)
         except (ConfigError, AuthRequiredError) as exc:
             errors += 1
             print(f"{prefix}ERROR: {exc}")
@@ -106,19 +135,29 @@ def _run_cloud(conn, record_only: bool) -> int:
     return 0 if failures == 0 else 2
 
 
-def run(record_only: bool = False, api_only: bool = False) -> int:
-    if record_only and api_only:
-        print("ERROR: --record y --api-only no se pueden combinar.")
+def run(record_only: bool = False, api_only: bool = False, months: bool = False,
+        preview: bool = False) -> int:
+    if sum((record_only, api_only, months)) > 1:
+        print("ERROR: --record, --api-only y --meses no se pueden combinar.")
+        return 1
+    if preview and not months:
+        print("ERROR: --vista-previa solo se usa junto con --meses.")
         return 1
     if api_only:
         return _run_api_only()
+    if record_only:
+        mode = "record"
+    elif months:
+        mode = "months-preview" if preview else "months"
+    else:
+        mode = "full"
     try:
         conn = history.connect()
     except Exception as exc:  # noqa: BLE001
         print(f"ERROR: no se pudo abrir la base de datos: {type(exc).__name__}: {exc}")
         return 1
     try:
-        return _run_cloud(conn, record_only) if use_db_tokens() else _run_local(conn, record_only)
+        return _run_cloud(conn, mode) if use_db_tokens() else _run_local(conn, mode)
     except Exception as exc:  # noqa: BLE001
         print(f"ERROR: {friendly_error(exc)}")
         return 1
@@ -131,5 +170,10 @@ if __name__ == "__main__":
     parser.add_argument("--record", action="store_true", help="solo registrar reproducciones")
     parser.add_argument("--api-only", action="store_true",
                         help="sin base de datos: solo playlists que salen de la API")
+    parser.add_argument("--meses", action="store_true",
+                        help="crear todas las playlists mensuales que faltan")
+    parser.add_argument("--vista-previa", action="store_true",
+                        help="con --meses: solo enseñar qué meses se crearían")
     args = parser.parse_args()
-    sys.exit(run(record_only=args.record, api_only=args.api_only))
+    sys.exit(run(record_only=args.record, api_only=args.api_only, months=args.meses,
+                 preview=args.vista_previa))

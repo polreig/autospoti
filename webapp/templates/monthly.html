@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Playlists mensuales{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div class="kicker">Crear playlists</div>
+  <h1>Playlists mensuales</h1>
+  <p class="muted">Una playlist por mes con tus {{ limit }} canciones más escuchadas, con nombres como
+    «{{ example }}». El día 1 de cada mes se crea sola la del mes que acaba de terminar.
+    Aquí puedes crear de una vez las de los meses anteriores que te falten.</p>
+</header>
+
+{% if error %}
+<div class="callout"><span class="ms" aria-hidden="true">error</span>
+  <div>No se pudo leer tu lista de playlists de Spotify. {{ error }}</div></div>
+{% elif not plans %}
+<div class="callout"><span class="ms" aria-hidden="true">upload_file</span>
+  <div>Todavía no hay ningún mes completo en tu registro. Importa tu historial en
+    <a href="/import">Importar historial</a> para crear las de meses anteriores.</div></div>
+{% else %}
+<section class="card">
+  {% if missing %}
+  <p><strong>Faltan {{ missing }} playlists mensuales.</strong> Revisa la lista: solo se crean las marcadas
+    como «Se creará». Las que ya tienes no se tocan.</p>
+  <form method="post" action="/monthly/create" data-busy="Creando…"
+        data-confirm="Se crearán {{ [missing, batch] | min }} playlists en tu Spotify{% if missing > batch %} (de {{ missing }}; pulsa otra vez para seguir){% endif %}. ¿Continuar?">
+    <button class="btn btn-primary"><span class="ms" aria-hidden="true">playlist_add</span>
+      Crear {% if missing > batch %}las {{ batch }} más antiguas{% else %}las {{ missing }} que faltan{% endif %}</button>
+  </form>
+  {% if missing > batch %}<p class="muted small">Se crean por tandas de {{ batch }} para no superar el tiempo
+    máximo de la web. Pulsa otra vez hasta que no falte ninguna.</p>{% endif %}
+  {% else %}
+  <p><strong>No falta ninguna.</strong> Tienes la playlist de todos los meses de tu historial.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Meses de tu historial</h2>
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>Playlist</th><th>Estado</th><th class="num">Canciones</th></tr></thead>
+      <tbody>
+      {% for p in plans %}
+        <tr><td>{{ p.name }}</td>
+          <td class="{% if p.status != 'crear' %}muted{% endif %}">{{ {
+            "tienes": "Ya la tienes",
+            "gestionada": "Ya la creó autospoti",
+            "pocas": "Muy pocas escuchas (menos de " ~ min_tracks ~ " canciones): no se crea",
+            "crear": "Se creará"}[p.status] }}</td>
+          <td class="num">{% if p.status == "crear" %}{{ p.tracks | length }}{% else %}<span class="muted">—</span>{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted small">Se reconocen también nombres como «Sept 25», «September 2025» o «Septiembre 25'».
+    Si borras una playlist que creó autospoti, no se vuelve a crear.</p>
+</section>
+{% endif %}
+{% endblock %}

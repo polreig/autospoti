@@ -38,12 +38,13 @@ class ApiOnlyTests(unittest.TestCase):
         # Las que dependen del registro propio NO se tocan (no se pisan con datos incompletos).
         self.assertNotIn(jobs.NAME_7D, written)
         self.assertNotIn(jobs.NAME_YEAR, written)
+        self.assertNotIn(jobs.NAME_ALWAYS, written)
 
     def test_full_mode_without_db_raises(self):
         with self.assertRaises(ValueError):
             jobs.update_auto_playlists(object(), None, "me", api_only=False)
 
-    def test_full_mode_updates_five_playlists(self):
+    def test_full_mode_updates_six_playlists(self):
         written = []
         conn = fresh_db()
         self.addCleanup(conn.close)
@@ -64,7 +65,8 @@ class ApiOnlyTests(unittest.TestCase):
         self.assertIn(jobs.NAME_4W, written)
         self.assertIn(jobs.NAME_6M, written)
         self.assertIn(jobs.NAME_YEAR, written)  # cae al ranking long_term de Spotify
-        self.assertEqual(len(outcomes), 5)
+        self.assertIn(jobs.NAME_ALWAYS, written)
+        self.assertEqual(len(outcomes), 6)
         seven = [o for o in outcomes if o.name == jobs.NAME_7D][0]
         self.assertFalse(seven.ok)
 
