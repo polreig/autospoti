@@ -368,6 +368,10 @@ def page_custom(ctx: Ctx) -> None:
         spec.include_artists = _split_names(col1.text_input("Solo estos artistas", placeholder="separados por comas"))
         spec.exclude_artists = _split_names(col2.text_input("Sin estos artistas", placeholder="separados por comas"))
         col1, col2 = st.columns(2)
+        spec.include_genres = _split_names(col1.text_input("Solo estos géneros", placeholder="p. ej. rock, indie",
+                                                           help="«rock» incluye también «indie rock»…"))
+        spec.exclude_genres = _split_names(col2.text_input("Sin estos géneros", placeholder="separados por comas"))
+        col1, col2 = st.columns(2)
         spec.min_plays = int(col1.number_input("Escuchas mínimas por canción", min_value=1, max_value=500, value=1))
         spec.min_seconds = int(col2.number_input("Segundos mínimos para contar", min_value=0, max_value=300,
                                                  value=spec.min_seconds, step=5,

@@ -26,6 +26,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 import blend
 import charts
+import genres
 import history
 import jobs
 import monthly
@@ -42,6 +43,7 @@ from webapp import forms
 BASE = Path(__file__).resolve().parent
 SESSION_MAX_AGE = 30 * 24 * 3600
 IMPORT_BATCH_MAX = 5000          # entradas por petición (Vercel limita el cuerpo a 4,5 MB)
+GENRE_PILLS = 18                 # géneros sugeridos en Personalizada
 MONTHLY_BATCH = 10               # playlists mensuales por petición (Vercel corta a los 60 s)
 STATS_CACHE_TTL = 600
 MIN_YEAR = 2008
@@ -343,14 +345,18 @@ def create_app() -> FastAPI:
             period = "anio_actual"
             start_ts, end_ts = range_for_dates(date(today.year, 1, 1), today, tz)
         result = cached_stats(db, uid, tz, start_ts, end_ts)
-        specs = {}
+        specs, top_genres = {}, []
         if result.plays:
             specs = {
                 "period": charts.period_bars(result.by_period, result.period_unit).to_dict(),
                 "artists": charts.ranked_bars(result.top_artists, "Artista").to_dict(),
                 "heatmap": charts.week_heatmap(result.heatmap).to_dict(),
             }
+            top_genres = genres.top_genres(db, uid, start_ts, end_ts, limit=15)
+            if top_genres:
+                specs["genres"] = charts.ranked_bars(top_genres, "Género").to_dict()
         return render(request, "stats.html", active="/stats", s=result, specs=specs, period=period,
+                      top_genres=top_genres,
                       year=year, years=years, has_any=history.coverage(db, uid).total > 0)
 
     # -------------------------------------------------------------- crear playlists
@@ -373,9 +379,13 @@ def create_app() -> FastAPI:
 
     @app.get("/custom", response_class=HTMLResponse)
     def custom(request: Request):
+        uid = current_user(request)
+        db = get_db()
         return preview(request, "custom.html", "/custom",
                        lambda db, uid: forms.custom_spec(request.query_params, date.today(),
-                                                         get_min_play_ms() // 1000))
+                                                         get_min_play_ms() // 1000),
+                       genre_top=genres.top_genres(db, uid, limit=GENRE_PILLS),
+                       genre_cov=genres.coverage(db, uid))
 
     @app.get("/rediscover", response_class=HTMLResponse)
     def rediscover(request: Request):

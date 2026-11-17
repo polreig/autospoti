@@ -75,6 +75,18 @@ SCHEMA_STATEMENTS = (
         PRIMARY KEY (owner, partner)
     )
     """,
+    # Géneros de cada artista (genres.py). Compartida entre cuentas: es información pública
+    # del artista, no historial de nadie. artist_key = nombre en minúsculas.
+    """
+    CREATE TABLE IF NOT EXISTS artists (
+        artist_key  TEXT   PRIMARY KEY,
+        name        TEXT   NOT NULL,
+        spotify_id  TEXT,
+        genres      TEXT   NOT NULL,      -- separados por "|"; vacío = sin género conocido
+        source      TEXT   NOT NULL,      -- spotify | lastfm | none-spotify | none
+        checked_at  BIGINT NOT NULL
+    )
+    """,
     # Tokens de Spotify por usuario (cifrados, ver tokens.py). Solo en modo nube.
     """
     CREATE TABLE IF NOT EXISTS spotify_tokens (

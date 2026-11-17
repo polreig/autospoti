@@ -5,6 +5,8 @@ name: Actualizar playlists automáticas
 #   * cada día 04:00 -> python cron.py            (registra + actualiza las 6 automáticas, las
 #                                                  recetas y crea la mensual del mes pasado)
 #   * a mano, modo "meses" -> python cron.py --meses  (crea TODAS las mensuales que faltan)
+#   * a mano, modo "generos" -> python cron.py --generos (tanda grande de géneros)
+# Cada ejecución horaria y diaria clasifica también una tanda pequeña de artistas por género.
 # Sin DATABASE_URL (modo antiguo): solo la ejecución diaria con --api-only (3 playlists).
 
 on:
@@ -16,7 +18,7 @@ on:
       mode:
         description: "Qué ejecutar"
         type: choice
-        options: [completo, registro, meses]
+        options: [completo, registro, meses, generos]
         default: completo
 
 permissions:
@@ -43,9 +45,10 @@ jobs:
           if [ "$HAS_DB" = true ]; then
             if [ "$hourly" = true ]; then args="--record"
             elif [ "$MODE" = "meses" ]; then args="--meses"
+            elif [ "$MODE" = "generos" ]; then args="--generos"
             else args=""; fi
-          elif [ "$MODE" = "meses" ]; then
-            echo "Las playlists mensuales necesitan el secret DATABASE_URL (tu historial)."
+          elif [ "$MODE" = "meses" ] || [ "$MODE" = "generos" ]; then
+            echo "Las playlists mensuales y los géneros necesitan el secret DATABASE_URL (tu historial)."
             args="skip"
           elif [ "$hourly" = true ]; then
             echo "Sin el secret DATABASE_URL no hay registro horario (no hay dónde guardarlo)."
@@ -75,5 +78,6 @@ jobs:
           SPOTIFY_CACHE: ${{ secrets.SPOTIFY_CACHE }}           # solo se usa la primera vez
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}            # opcional (géneros)
           HISTORY_ENABLED: ${{ secrets.DATABASE_URL != '' && 'true' || 'false' }}
         run: python cron.py ${{ steps.plan.outputs.args }}

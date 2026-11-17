@@ -186,6 +186,20 @@ class WebAppTests(unittest.TestCase):
         payload = r.text.split('id="chart-specs">')[1].split("</script>")[0]
         self.assertEqual(sorted(json.loads(payload)), ["artists", "heatmap", "period"])
 
+    def test_genres_on_stats_and_custom(self):
+        import genres
+        genres._save(self.db, "artista 0", "Artista 0", None, ["indie rock"], genres.SOURCE_SPOTIFY)
+        client = self.client()
+        r = client.get("/stats?period=todo")
+        payload = r.text.split('id="chart-specs">')[1].split("</script>")[0]
+        self.assertIn("genres", json.loads(payload))
+        page = client.get("/custom?period=todo").text
+        self.assertIn('name="g" value="indie rock"', page)
+        self.assertIn("Se conoce el género de 1 de tus 4 artistas", page)
+        filtered = client.get("/custom?period=todo&g=rock").text
+        self.assertIn("Artista 0", filtered)
+        self.assertNotIn("Artista 1", filtered)
+
     def test_rediscover_finds_forgotten_song(self):
         r = self.client().get("/rediscover?min_plays=5")
         self.assertIn("Vieja", r.text)

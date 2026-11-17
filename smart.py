@@ -15,6 +15,7 @@ from datetime import date, datetime, timedelta, timezone, tzinfo
 from typing import Iterable
 
 import blend
+import genres
 import history
 from dateranges import MESES_ES, range_for_dates, range_last_days
 from db import Database
@@ -46,6 +47,8 @@ class Spec:
     hours: list[int] = field(default_factory=list)     # 0-23; vacío = todas
     include_artists: list[str] = field(default_factory=list)
     exclude_artists: list[str] = field(default_factory=list)
+    include_genres: list[str] = field(default_factory=list)   # «rock» encaja con «indie rock»
+    exclude_genres: list[str] = field(default_factory=list)
     avoid_skipped: bool = False
     min_plays: int = 1
     min_seconds: int = 30
@@ -107,6 +110,10 @@ class Spec:
             parts.append("solo " + ", ".join(self.include_artists))
         if self.exclude_artists:
             parts.append("sin " + ", ".join(self.exclude_artists))
+        if self.include_genres:
+            parts.append("género: " + ", ".join(self.include_genres))
+        if self.exclude_genres:
+            parts.append("sin el género " + ", ".join(self.exclude_genres))
         if self.avoid_skipped:
             parts.append("sin las que sueles saltar")
         if self.min_plays > 1:
@@ -143,8 +150,15 @@ def _matches_artist(artist: str, needles: list[str]) -> bool:
 
 
 def aggregate(events: Iterable[PlayEvent], spec: Spec, tz: tzinfo,
-              exclude_uris: "set[str] | None" = None) -> list[TopTrack]:
-    """Aplica los filtros de la receta y devuelve el ranking (más escuchadas primero)."""
+              exclude_uris: "set[str] | None" = None,
+              artist_genres: "dict[str, list[str]] | None" = None) -> list[TopTrack]:
+    """Aplica los filtros de la receta y devuelve el ranking (más escuchadas primero).
+
+    ``artist_genres``: {artista -> géneros} (``genres.genres_for``); solo hace falta si la
+    receta filtra por género. Un artista sin género conocido no entra en «solo estos
+    géneros» y sí en «sin estos géneros».
+    """
+    artist_genres = artist_genres or {}
     min_ms = max(0, spec.min_seconds) * 1000
     months, weekdays, hours = set(spec.months), set(spec.weekdays), set(spec.hours)
     needs_time = bool(months or weekdays or hours)
@@ -157,6 +171,10 @@ def aggregate(events: Iterable[PlayEvent], spec: Spec, tz: tzinfo,
         if spec.include_artists and not _matches_artist(artist, spec.include_artists):
             continue
         if spec.exclude_artists and _matches_artist(artist, spec.exclude_artists):
+            continue
+        if spec.include_genres and not genres.matches(artist_genres.get(artist), spec.include_genres):
+            continue
+        if spec.exclude_genres and genres.matches(artist_genres.get(artist), spec.exclude_genres):
             continue
         if needs_time:
             local = datetime.fromtimestamp(ev.ts, tz)
@@ -198,8 +216,11 @@ def build_tracks(conn: Database, user_id: str, spec: Spec, tz: tzinfo,
         if not blend.is_linked(conn, user_id, spec.partner):
             return []
         wide = replace(spec, limit=10_000) if spec.blend_mode == "comunes" else spec
-        mine = aggregate(history.fetch_plays(conn, user_id, start_ts, end_ts), wide, tz)
-        theirs = aggregate(history.fetch_plays(conn, spec.partner, start_ts, end_ts), wide, tz)
+        mine_events = history.fetch_plays(conn, user_id, start_ts, end_ts)
+        their_events = history.fetch_plays(conn, spec.partner, start_ts, end_ts)
+        known = _genres_needed(conn, spec, mine_events + their_events)
+        mine = aggregate(mine_events, wide, tz, artist_genres=known)
+        theirs = aggregate(their_events, wide, tz, artist_genres=known)
         return blend.combine(mine, theirs, spec.blend_mode, spec.limit)
     exclude: set[str] = set()
     if spec.kind == "rediscover":
@@ -209,7 +230,15 @@ def build_tracks(conn: Database, user_id: str, spec: Spec, tz: tzinfo,
             return []
         exclude = history.uris_played_since(conn, user_id, cutoff)
     events = history.fetch_plays(conn, user_id, start_ts, end_ts)
-    return aggregate(events, spec, tz, exclude_uris=exclude)
+    return aggregate(events, spec, tz, exclude_uris=exclude,
+                     artist_genres=_genres_needed(conn, spec, events))
+
+
+def _genres_needed(conn: Database, spec: Spec, events: list[PlayEvent]) -> dict[str, list[str]]:
+    """Géneros de los artistas de las escuchas, solo si la receta filtra por género."""
+    if not (spec.include_genres or spec.exclude_genres):
+        return {}
+    return genres.genres_for(conn, {ev.artist for ev in events if ev.artist})
 
 
 def last_played(conn: Database, user_id: str, uris: list[str]) -> dict[str, int]:

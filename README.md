@@ -3,7 +3,8 @@
 Web para crear y mantener playlists de Spotify a partir de un registro propio de todo lo que escuchas.
 
 * **Estadisticas**: escuchas y horas, evolucion por mes, artistas y canciones mas escuchados y un mapa de cuando escuchas (dia x hora).
-* **Playlist personalizada**: por periodo (ultimos N dias, un mes, fechas o todo) con filtros por meses, dias de la semana, franja horaria, artistas, escuchas minimas y "evitar las que sueles saltar".
+* **Playlist personalizada**: por periodo (ultimos N dias, un mes, fechas o todo) con filtros por **genero**, meses, dias de la semana, franja horaria, artistas, escuchas minimas y "evitar las que sueles saltar".
+* **Generos**: todo tu historial (tambien el importado) se clasifica por genero solo; en **Estadisticas** ves tus generos mas escuchados.
 * **Redescubrimientos**: canciones que escuchaste mucho y llevas meses sin poner.
 * **En pareja**: mezclas con otra cuenta enlazada (lo que escuchais los dos, o mitad y mitad). Requiere que las dos personas acepten.
 * **Mis recetas**: cualquier playlist anterior puede guardarse para que se recalcule sola cada dia.
@@ -32,6 +33,7 @@ En el [dashboard de Spotify](https://developer.spotify.com/dashboard), en tu app
 En el repo, **Settings > Secrets and variables > Actions**, secrets:
 * `SPOTIPY_CLIENT_ID`, `SPOTIPY_CLIENT_SECRET`
 * `DATABASE_URL`: la de Neon
+* `LASTFM_API_KEY` *(opcional)*: completa los generos que Spotify no tiene (ver **Generos**).
 * `SPOTIFY_CACHE` *(opcional)*: el contenido de un `.cache` generado con `python auth.py`. Solo sirve para que el registro empiece antes de tu primer login en la web; si no lo pones, empieza en cuanto entres en la web.
 
 ### 4. Web (Vercel)
@@ -60,7 +62,28 @@ Hazlo una vez, despues de importar tu historial:
 
 Alternativa sin la web: en GitHub, **Actions > Actualizar playlists automaticas > Run workflow**, elige el modo `meses` y pulsa **Run workflow**. Crea todas las que falten de una vez.
 
-Las playlists nuevas se crean privadas. Si borras una que creo autospoti, no se vuelve a crear.
+Las playlists se crean publicas. Si borras una que creo autospoti, no se vuelve a crear.
+
+## Generos
+
+Cada hora, ademas de registrar tus escuchas, autospoti busca el genero de unos 60 artistas de tu historial, empezando por los que mas escuchas. En uno o dos dias esta todo tu historial clasificado, tambien lo importado de anos anteriores. No tienes que hacer nada.
+
+* **Donde se usa:** en **Personalizada**, marca uno o varios generos (o escribelos en **Otros generos**). *rock* incluye tambien *indie rock*, *rock en espanol*... Debajo veras cuantos artistas tienen ya genero.
+* **Recetas:** si marcas **Mantenerla actualizada cada dia**, la playlist de ese genero se recalcula sola.
+* **Ir mas rapido (opcional):** en GitHub, **Actions > Actualizar playlists automaticas > Run workflow**, modo `generos`. Clasifica una tanda grande (unos 20 minutos).
+* **Limitacion:** el genero es del artista, no de cada cancion, y solo cuenta el artista principal.
+
+### Completar con Last.fm (opcional, recomendado)
+
+Spotify no tiene genero para muchos artistas pequenos. Con una clave gratuita de Last.fm se completan esos.
+
+1. Entra en [last.fm](https://www.last.fm) e inicia sesion (o crea una cuenta gratis).
+2. Abre [last.fm/api/account/create](https://www.last.fm/api/account/create).
+3. Rellena **Application name** (por ejemplo `autospoti`) y tu email de contacto. El resto puede quedar vacio. Pulsa **Submit**.
+4. En la pagina siguiente copia el valor de **API key** (no hace falta el *Shared secret*).
+5. En GitHub, en el repo: **Settings > Secrets and variables > Actions > New repository secret**. Nombre: `LASTFM_API_KEY`. Valor: la clave copiada. Pulsa **Add secret**.
+
+Deberia verse: en la siguiente ejecucion horaria (pestana **Actions**), la linea *Generos: ... artistas clasificados* sale con mas artistas *con genero*. Los artistas que ya se habian mirado sin exito se vuelven a probar con Last.fm.
 
 ## Uso en tu PC (opcional)
 

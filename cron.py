@@ -6,6 +6,7 @@ Uso:
     python cron.py --record    # solo registra reproducciones (ejecutar cada hora)
     python cron.py --meses     # crea TODAS las playlists mensuales que faltan
     python cron.py --meses --vista-previa   # solo enseña qué meses se crearían
+    python cron.py --generos   # clasifica por género una tanda grande de artistas (~20 min)
     python cron.py --api-only  # sin base de datos: solo las 3 playlists que salen de la API
                                # (no toca las de 7 días, último año ni Always).
 
@@ -16,10 +17,14 @@ Dónde se guarda todo:
 
 ``recently_played`` solo devuelve las últimas 50: programa --record cada hora o perderás
 reproducciones si escuchas mucho.
+
+Cada ejecución (también la horaria) clasifica además una tanda pequeña de artistas por
+género (genres.py), así todo el historial queda clasificado solo en uno o dos días.
 """
 import argparse
 import sys
 
+import genres
 import history
 import jobs
 import monthly
@@ -50,15 +55,36 @@ def _print_month_plan(plans, prefix: str = "") -> None:
     print(f"{prefix}{len(plans)} meses completos en tu historial; se crearían {missing}.")
 
 
+# Tandas de clasificación por género: (artistas como máximo, segundos como máximo).
+GENRES_SMALL = (60, 90)          # en cada ejecución horaria y diaria
+GENRES_BIG = (3000, 20 * 60)     # modo --generos (a mano)
+
+
+def _tag_genres(sp, conn, user_id: str, budget: tuple[int, int], prefix: str = "") -> None:
+    """Clasifica una tanda de artistas. Un fallo aquí nunca hace fallar el registro."""
+    try:
+        result = genres.tag_artists(sp, conn, user_id, max_artists=budget[0], max_seconds=budget[1])
+        if result.processed or result.stopped:
+            left = genres.coverage(conn, user_id).pending
+            print(f"{prefix}Géneros: {result.processed} artistas clasificados ({result.with_genre} con "
+                  f"género); faltan {left}." + (f" Parado: {result.stopped}." if result.stopped else ""))
+    except Exception as exc:  # noqa: BLE001
+        print(f"{prefix}Géneros: no se pudieron clasificar ahora ({friendly_error(exc)}).")
+
+
 def _run_user(sp, conn, user_id: str, mode: str, prefix: str = "") -> int:
     """Procesa una cuenta. Devuelve el número de playlists que no se pudieron actualizar.
 
     ``mode``: "record" (solo registrar), "full" (diaria), "months" (crear todas las mensuales
-    que faltan) o "months-preview" (solo enseñar cuáles).
+    que faltan), "months-preview" (solo enseñar cuáles) o "genres" (tanda grande de géneros).
     """
     if mode == "record":
         new, dup = jobs.record_recent_plays(sp, conn, user_id)
         print(f"{prefix}Registro: {new} nuevas, {dup} ya existentes.")
+        _tag_genres(sp, conn, user_id, GENRES_SMALL, prefix)
+        return 0
+    if mode == "genres":
+        _tag_genres(sp, conn, user_id, GENRES_BIG, prefix)
         return 0
     tz = get_timezone()
     index = PlaylistIndex(sp, user_id)  # compartido por todas las escrituras de la ejecución
@@ -74,7 +100,9 @@ def _run_user(sp, conn, user_id: str, mode: str, prefix: str = "") -> int:
     outcomes = jobs.update_auto_playlists(sp, conn, user_id, index=index)
     outcomes += jobs.update_recipes(sp, conn, user_id, tz, index=index)
     outcomes += jobs.create_monthly_playlists(sp, conn, user_id, tz, index, only_previous_month=True)
-    return _print_outcomes(outcomes, prefix)
+    failures = _print_outcomes(outcomes, prefix)
+    _tag_genres(sp, conn, user_id, GENRES_SMALL, prefix)  # después: nunca retrasa las playlists
+    return failures
 
 
 def _run_api_only() -> int:
@@ -136,9 +164,9 @@ def _run_cloud(conn, mode: str) -> int:
 
 
 def run(record_only: bool = False, api_only: bool = False, months: bool = False,
-        preview: bool = False) -> int:
-    if sum((record_only, api_only, months)) > 1:
-        print("ERROR: --record, --api-only y --meses no se pueden combinar.")
+        preview: bool = False, genres_only: bool = False) -> int:
+    if sum((record_only, api_only, months, genres_only)) > 1:
+        print("ERROR: --record, --api-only, --meses y --generos no se pueden combinar.")
         return 1
     if preview and not months:
         print("ERROR: --vista-previa solo se usa junto con --meses.")
@@ -149,6 +177,8 @@ def run(record_only: bool = False, api_only: bool = False, months: bool = False,
         mode = "record"
     elif months:
         mode = "months-preview" if preview else "months"
+    elif genres_only:
+        mode = "genres"
     else:
         mode = "full"
     try:
@@ -174,6 +204,8 @@ if __name__ == "__main__":
                         help="crear todas las playlists mensuales que faltan")
     parser.add_argument("--vista-previa", action="store_true",
                         help="con --meses: solo enseñar qué meses se crearían")
+    parser.add_argument("--generos", action="store_true",
+                        help="clasificar por género una tanda grande de artistas")
     args = parser.parse_args()
     sys.exit(run(record_only=args.record, api_only=args.api_only, months=args.meses,
-                 preview=args.vista_previa))
+                 preview=args.vista_previa, genres_only=args.generos))

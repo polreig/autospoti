@@ -184,13 +184,14 @@ def create_or_update_playlist(
     name: str,
     track_uris: list[str],
     description: str = "",
-    public: bool = False,
+    public: bool = True,
     *,
     index: "PlaylistIndex | None" = None,
     playlist_id: "str | None" = None,
 ) -> PlaylistResult:
     """Crea o actualiza una playlist propia. Con lista vacía NO toca nada (evita vaciarla).
 
+    ``public``: las playlists de autospoti son públicas (al crearlas y al actualizarlas).
     ``playlist_id``: ID recordado de una ejecución anterior; se usa si la playlist sigue
     siendo tuya aunque le hayas cambiado el nombre. Si no, se busca por nombre exacto.
     ``index``: índice compartido para no volver a descargar tus playlists en cada llamada.
@@ -209,7 +210,8 @@ def create_or_update_playlist(
         playlist_id = playlist["id"]
         index.remember(playlist_id, name)
     else:
-        sp.playlist_change_details(playlist_id, description=description)
+        # También pasa a pública una playlist que se creó privada en versiones anteriores.
+        sp.playlist_change_details(playlist_id, public=public, description=description)
     _write_items(sp, playlist_id, uris)
     return PlaylistResult(
         playlist_id=playlist_id,

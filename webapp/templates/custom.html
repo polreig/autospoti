@@ -34,6 +34,19 @@
     <label class="field"><span>Canciones</span><input type="number" name="limit" min="10" max="500" step="10" value="{{ q.int('limit', 50, 10, 500) }}"></label>
   </div>
 
+  <fieldset class="pills"><legend>Géneros</legend>
+    {% set chosen = q.getlist('g') %}
+    {% for name, _n in genre_top %}<label class="pill"><input type="checkbox" name="g" value="{{ name }}" {% if name in chosen %}checked{% endif %}><span>{{ name }}</span></label>{% endfor %}
+    {% for name in chosen %}{% if name not in genre_top | map(attribute=0) | list %}<label class="pill"><input type="checkbox" name="g" value="{{ name }}" checked><span>{{ name }}</span></label>{% endif %}{% endfor %}
+  </fieldset>
+  <div class="row">
+    <label class="field grow"><span>Otros géneros</span><input type="text" name="gen" value="{{ q.get('gen') }}" placeholder="p. ej. flamenco, synthpop (separados por comas)"></label>
+    <label class="field grow"><span>Sin estos géneros</span><input type="text" name="xgen" value="{{ q.get('xgen') }}" placeholder="separados por comas"></label>
+  </div>
+  <p class="muted small">«rock» incluye también «indie rock», «rock en español»… El género es el del artista.
+    {% if genre_cov.artists %}Se conoce el género de {{ genre_cov.with_genre }} de tus {{ genre_cov.artists }} artistas
+    ({{ genre_cov.percent_plays }} % de tus escuchas){% if genre_cov.pending %}; los {{ genre_cov.pending }} que faltan se completan solos cada hora{% endif %}.{% endif %}</p>
+
   <details class="advanced" {% if q.getlist('m') or q.getlist('d') or q.getlist('f') or q.get('inc') or q.get('exc') or q.get('avoid') %}open{% endif %}>
     <summary><span class="ms" aria-hidden="true">tune</span>Filtros avanzados</summary>
     {% if period != "mes" %}

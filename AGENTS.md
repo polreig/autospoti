@@ -10,6 +10,7 @@ App en Python para crear playlists de Spotify: web FastAPI (Vercel) + spotipy + 
 - App Streamlit (local, una cuenta): `streamlit run autoplaylist.py`
 - Autorizar Spotify (una vez): `python auth.py`
 - Tarea programada: `python cron.py` (todo) o `python cron.py --record` (solo registrar)
+- Clasificar por género una tanda grande: `python cron.py --generos` (cada `--record` ya hace una pequeña)
 - Playlists mensuales que faltan: `python cron.py --meses --vista-previa` (ver) y `python cron.py --meses` (crear)
 - Importar historial exportado: `python import_history.py "<carpeta o .json>"`
 - Tests: `python -m unittest discover -s tests` (con `TEST_DATABASE_URL` también contra Postgres)
@@ -25,6 +26,7 @@ App en Python para crear playlists de Spotify: web FastAPI (Vercel) + spotipy + 
 - `autoplaylist.py` = interfaz Streamlit (local): una función `page_*(ctx)` por página registrada en `_pages()`; tema en `.streamlit/config.toml`. Cada página nueva (en Streamlit o en `webapp/`) debe añadirse a su `test_every_page_renders`
 - `history_import.py` = export de Spotify; `dateranges.py` = rangos
 - `jobs.py` = lógica compartida por la app y `cron.py`; `autoplaylist.py` = solo interfaz
+- `genres.py` = géneros por artista (tabla `artists`, compartida entre cuentas: es información pública del artista). Spotify (`GET /tracks/{id}` + `GET /artists/{id}`, 2 peticiones por artista porque desde feb. 2026 no hay lotes) y, si no hay géneros, Last.fm (`LASTFM_API_KEY`, opcional). `tag_artists` clasifica una tanda; el filtro está en `smart.Spec.include_genres/exclude_genres`
 - `monthly.py` = playlists mensuales («September 25'»): nombres, reconocer las que ya existen y plan de meses que faltan (sin escribir). La escritura está en `jobs.create_monthly_playlists`; la página web es `/monthly`
 
 ## Reglas
@@ -37,6 +39,9 @@ App en Python para crear playlists de Spotify: web FastAPI (Vercel) + spotipy + 
 - Toda consulta o escritura del historial lleva `user_id` (preparado para varios usuarios). Las playlists se escriben con `jobs.write_playlist` (recuerda su ID en `managed_playlists`) y compartiendo un `PlaylistIndex` por ejecución.
 - Las automáticas son 6: últimas reproducciones (50), 7 días (50), 4 semanas (100), 6 meses (100), último año (100) y Always (250). Límites en `jobs.LIMIT_*`. **No cambiar los `jobs.NAME_*`**: el ID guardado va por nombre y se crearía otra playlist.
 - 4 semanas, 6 meses y año salen del registro propio si cubre el periodo (hay escuchas desde antes de su inicio); si no, del ranking de Spotify. 7 días y Always solo del registro.
+- Géneros: el cron clasifica una tanda pequeña (`cron.GENRES_SMALL`) en cada ejecución, **después** de registrar o de actualizar las playlists, y un fallo ahí nunca cambia el código de salida. La tanda usa un cliente de Spotify sin reintentos (`genres._careful_client`) y se para al primer 429: Spotify puede pedir horas de espera y el cron se colgaría. Un fallo de Last.fm nunca marca un artista como «sin género» (se reintenta).
+- El género es del artista (el principal guardado en `plays.artist`), no de la canción. Un artista sin género conocido no entra en «solo estos géneros» y sí en «sin estos géneros». «rock» encaja con «indie rock» (palabras completas, `genres.matches`).
+- Todas las playlists que escribe autospoti son públicas (Pol lo quiere así): `create_or_update_playlist` usa `public=True` al crear y al actualizar.
 - `history.top_tracks` junta las versiones de una canción (mismo título y artista, distinta URI) para que no salga dos veces.
 - Mensuales: la tarea diaria solo crea la del mes pasado; las antiguas se crean a mano (web `/monthly` con vista previa, o `--meses`). Nunca se toca una mensual que ya exista, y una que creó autospoti (está en `managed_playlists`) no se vuelve a crear aunque se borre. Meses con menos de `monthly.MONTHLY_MIN_TRACKS` canciones no se crean.
 - Añadir un test en `tests/` por cada cambio de lógica. Respuestas y textos de la interfaz en español.

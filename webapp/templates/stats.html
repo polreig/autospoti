@@ -57,6 +57,15 @@
   </div>
 </section>
 
+{% if top_genres %}
+<section class="card">
+  <h2>Géneros más escuchados</h2>
+  <p class="muted small">Escuchas de los artistas de cada género (un artista puede tener varios).
+    Úsalos como filtro en <a href="/custom">Personalizada</a>.</p>
+  <div class="chart" data-spec="genres" role="img" aria-label="Ranking de géneros"></div>
+</section>
+{% endif %}
+
 <section class="card">
   <h2>Canciones más escuchadas</h2>
   <div class="table-wrap"><table class="table">
@@ -72,6 +81,8 @@
       <tbody>{% for k, n in s.by_period %}<tr><td>{{ k }}</td><td class="num">{{ n }}</td></tr>{% endfor %}</tbody></table></div>
     <div class="table-wrap"><table class="table"><thead><tr><th>Artista</th><th class="num">Escuchas</th></tr></thead>
       <tbody>{% for a, n in s.top_artists %}<tr><td>{{ a }}</td><td class="num">{{ n }}</td></tr>{% endfor %}</tbody></table></div>
+    {% if top_genres %}<div class="table-wrap"><table class="table"><thead><tr><th>Género</th><th class="num">Escuchas</th></tr></thead>
+      <tbody>{% for g, n in top_genres %}<tr><td>{{ g }}</td><td class="num">{{ n }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
   </div>
 </details>
 <script type="application/json" id="chart-specs">{{ specs | tojson }}</script>

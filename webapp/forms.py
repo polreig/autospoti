@@ -95,6 +95,9 @@ def _apply_filters(p: Params, spec: smart.Spec) -> None:
     spec.hours = sorted({h for f in franjas for h in smart.FRANJAS[f]})
     spec.include_artists = _names(p.get("inc"))
     spec.exclude_artists = _names(p.get("exc"))
+    picked = [g.strip()[:60] for g in p.getlist("g") if g.strip()]
+    spec.include_genres = list(dict.fromkeys(picked + _names(p.get("gen"))))[:20]
+    spec.exclude_genres = _names(p.get("xgen"))
     spec.min_plays = p.int("min_plays", 1, 1, 500)
     spec.avoid_skipped = p.get("avoid") == "1"
 

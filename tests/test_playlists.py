@@ -63,6 +63,13 @@ class PlaylistTests(unittest.TestCase):
         self.assertEqual(res.playlist_id, "target")
         self.assertIn(("replace", "target", ["spotify:track:1"]), sp.calls)
         self.assertEqual(sp.calls[0][0], "details")
+        self.assertTrue(sp.calls[0][2]["public"])  # una antigua privada pasa a pública
+
+    def test_new_playlists_are_public(self):
+        sp = FakeSpotify([[]])
+        spotify_core.create_or_update_playlist(sp, "me", "Nueva", ["spotify:track:1"], "d")
+        create = [c for c in sp.calls if c[0] == "create"][0]
+        self.assertTrue(create[2])
 
     def test_ignores_same_name_owned_by_others(self):
         sp = FakeSpotify([[{"id": "x", "name": "Lista", "owner": {"id": "otro"}}]])
